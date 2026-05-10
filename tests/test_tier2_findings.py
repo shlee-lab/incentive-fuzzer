@@ -60,3 +60,17 @@ def test_rebate_pool_finds_mev_rebate_capture():
         "MEV rebate-capture deviation not found.\n"
         + "\n".join(f.summary() for f in findings)
     )
+
+
+@pytest.mark.timeout(180)
+def test_sandwich_pool_finds_mev_sandwich():
+    """D: Multi-action (compound) mutation. MEV front+back swaps around victim."""
+    report = Campaign("specs/sandwich_pool.yaml").run()
+    findings = report.profitable_deviations()
+    assert any(
+        _matches_expected(f, "MEV", ["swapAtoB", "swapAllBtoA"], 1_000_000_000_000_000_000)  # 1 TKA
+        for f in findings
+    ), (
+        "MEV sandwich deviation not found.\n"
+        + "\n".join(f.summary() for f in findings)
+    )

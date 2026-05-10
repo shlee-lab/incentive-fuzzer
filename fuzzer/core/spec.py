@@ -14,6 +14,9 @@ class MutatorHints:
     try_skip_actions: bool = True
     try_action_insertion: bool = True
     try_numeric_mutation: bool = False
+    try_compound_pair_insertion: bool = False
+    compound_phase_first: int | None = None
+    compound_phase_second: int | None = None
 
 
 @dataclass
@@ -110,6 +113,9 @@ def load_spec(path: str | Path, role_addresses: dict[str, str]) -> Spec:
             try_skip_actions=bool(body.get("try_skip_actions", True)),
             try_action_insertion=bool(body.get("try_action_insertion", True)),
             try_numeric_mutation=bool(body.get("try_numeric_mutation", False)),
+            try_compound_pair_insertion=bool(body.get("try_compound_pair_insertion", False)),
+            compound_phase_first=(int(body["compound_phase_first"]) if "compound_phase_first" in body else None),
+            compound_phase_second=(int(body["compound_phase_second"]) if "compound_phase_second" in body else None),
         )
     for role_name in role_lookup:
         hints.setdefault(role_name, MutatorHints())

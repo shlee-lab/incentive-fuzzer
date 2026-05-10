@@ -162,6 +162,23 @@ def generate_deviations(
                     new_strat.actions.insert(pos, Action(function=fn_name, args=dict(args)))
                     _add(new_strat)
 
+    # 5. Compound pair insertion (two actions, each with its own phase tag).
+    if hints.try_compound_pair_insertion and hints.compound_phase_first is not None and hints.compound_phase_second is not None:
+        p1 = hints.compound_phase_first
+        p2 = hints.compound_phase_second
+        for fn1 in role.callable_functions:
+            variants1 = _build_default_args_variants(fn1, role, abi, value_pool)
+            for fn2 in role.callable_functions:
+                variants2 = _build_default_args_variants(fn2, role, abi, value_pool)
+                for i, args1 in enumerate(variants1):
+                    for j, args2 in enumerate(variants2):
+                        new_strat = honest.clone(
+                            new_name=f"compound_{fn1}@p{p1}#v{i}+{fn2}@p{p2}#v{j}"
+                        )
+                        new_strat.actions.append(Action(function=fn1, args=dict(args1), phase=p1))
+                        new_strat.actions.append(Action(function=fn2, args=dict(args2), phase=p2))
+                        _add(new_strat)
+
     # 4. Numeric mutation of existing args (multipliers).
     if hints.try_numeric_mutation:
         multipliers = (("0.5x", 0.5), ("0.9x", 0.9), ("1.1x", 1.1), ("1.5x", 1.5), ("2x", 2.0))
