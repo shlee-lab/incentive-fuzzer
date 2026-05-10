@@ -34,6 +34,31 @@ def test_uranium_finds_k_invariant_drain():
     )
 
 
+@pytest.mark.timeout(300)
+def test_uranium_full_surface_validation():
+    """Uranium with the full UniswapV2Pair surface (mint/burn/swap/sync/skim).
+
+    This is the rigorous TP/FP/FN check: the attacker is exposed to every
+    public state-changing function plus depth-2 compound mutations. The
+    fuzzer must (a) find the K-bug drain and (b) NOT report any deviation
+    that doesn't actually contain `swap`. Property (b) verifies there are
+    no profitable non-K-bug paths in the contract.
+    """
+    report = Campaign("specs/uranium_pair_full.yaml").run()
+    findings = report.profitable_deviations()
+    # TP: K-bug drain found at full magnitude.
+    assert any(
+        _matches_expected(f, "Attacker", ["swap"], 100_000_000_000_000_000_000)  # 100 TKA
+        for f in findings
+    ), "Full-surface Uranium drain not found."
+    # No-FP: every profitable deviation must contain a swap (the only bug).
+    non_swap = [f for f in findings if "swap" not in [a.function for a in f.deviation.actions]]
+    assert not non_swap, (
+        f"Found {len(non_swap)} false-positive deviations that profit without using swap:\n"
+        + "\n".join(f.summary() for f in non_swap)
+    )
+
+
 @pytest.mark.timeout(180)
 def test_safemoon_finds_unauthorized_burn():
     """SafeMoon V2 (Mar 2023): public burn(address,uint) lets attacker burn victim's shares."""
