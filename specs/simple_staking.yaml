@@ -1,0 +1,40 @@
+contract: targets/tier1_trivial/SimpleStaking.sol
+contract_name: SimpleStaking
+deploy_value_wei: 0
+deploy_args:
+  - "@Validator"
+
+roles:
+  - name: Delegator
+    initial_eth_wei: 1_000_000_000_000_000_000_000   # 1000 ETH
+    callable_functions: [delegate, withdraw]
+  - name: Validator
+    initial_eth_wei: 2_000_000_000_000_000_000_000   # 2000 ETH (room to self-delegate)
+    callable_functions: [delegate, withdraw]
+
+honest_strategies:
+  Delegator:
+    actions:
+      - { function: delegate, args: { value_wei: 10_000_000_000_000_000_000 } }   # 10 ETH stake
+  Validator:
+    actions:
+      - { function: distribute_rewards, args: { amount_wei: 1_000_000_000_000_000_000_000 } }   # 1000 ETH reward (env)
+      - { function: withdraw }
+
+mutator_hints:
+  Validator:
+    try_self_targeting: true
+    try_skip_actions: true
+    try_action_insertion: true
+    try_numeric_mutation: false
+  Delegator:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: false
+    try_numeric_mutation: false
+
+expected_findings:
+  - role: Validator
+    deviation_must_contain: [delegate]
+    payoff_higher_than_honest: true
+    min_payoff_diff_wei: 1_000_000_000_000_000_000   # 1 ETH

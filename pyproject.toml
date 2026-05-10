@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "incentive-fuzzer"
+version = "0.1.0"
+description = "Fuzzer for incentive invariants in Solidity protocols"
+requires-python = ">=3.11"
+dependencies = [
+    "web3>=6.15,<7.0",
+    "pyyaml>=6.0",
+    "pytest>=7.0",
+    "pytest-timeout>=2.1",
+]
+
+[tool.setuptools.packages.find]
+include = ["fuzzer*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
