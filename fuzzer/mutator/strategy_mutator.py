@@ -38,6 +38,10 @@ def _collect_value_pool(spec: Spec, role: Role) -> list[int]:
                         pool.add(int(v.replace("_", "")))
                     except ValueError:
                         pass
+    for action in spec.setup_calls:
+        for v in action.args.values():
+            if isinstance(v, int) and not isinstance(v, bool):
+                pool.add(v)
     if spec.deploy_value_wei:
         pool.add(spec.deploy_value_wei)
     for arg in spec.deploy_args:
@@ -48,6 +52,10 @@ def _collect_value_pool(spec: Spec, role: Role) -> list[int]:
                 pool.add(int(arg.replace("_", "")))
             except ValueError:
                 pass
+    for tdef in spec.tokens:
+        for v in tdef.initial_balances.values():
+            if isinstance(v, int) and not isinstance(v, bool):
+                pool.add(v)
     pool.add(role.initial_eth)
     return sorted(pool)
 

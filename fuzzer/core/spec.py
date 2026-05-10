@@ -25,6 +25,13 @@ class ExpectedFinding:
 
 
 @dataclass
+class TokenDef:
+    name: str
+    decimals: int
+    initial_balances: dict[str, int]   # role-name (or "__admin__") -> raw token units
+
+
+@dataclass
 class Spec:
     contract_path: Path
     contract_name: str
@@ -33,6 +40,8 @@ class Spec:
     roles: list[Role]
     honest_strategies: dict[str, Strategy]
     mutator_hints: dict[str, MutatorHints]
+    tokens: list[TokenDef] = field(default_factory=list)
+    setup_calls: list["Action"] = field(default_factory=list)
     expected_findings: list[ExpectedFinding] = field(default_factory=list)
 
     def role_by_name(self, name: str) -> Role:
@@ -74,6 +83,7 @@ def load_spec(path: str | Path, role_addresses: dict[str, str]) -> Spec:
                 address=role_addresses[name],
                 initial_eth=_coerce_int(r["initial_eth_wei"]),
                 callable_functions=r["callable_functions"],
+                primary_asset=r.get("primary_asset", "ETH"),
             )
         )
     role_lookup = {r.name: r for r in roles}
@@ -110,6 +120,21 @@ def load_spec(path: str | Path, role_addresses: dict[str, str]) -> Spec:
             )
         )
 
+    tokens: list[TokenDef] = []
+    for t in raw.get("tokens", []) or []:
+        balances = {k: _coerce_int(v) for k, v in (t.get("initial_balances") or {}).items()}
+        tokens.append(
+            TokenDef(
+                name=t["name"],
+                decimals=int(t.get("decimals", 18)),
+                initial_balances=balances,
+            )
+        )
+
+    setup_calls: list[Action] = []
+    for c in raw.get("setup_calls", []) or []:
+        setup_calls.append(Action(function=c["function"], args=c.get("args", {}) or {}))
+
     return Spec(
         contract_path=contract_path,
         contract_name=contract_name,
@@ -118,5 +143,7 @@ def load_spec(path: str | Path, role_addresses: dict[str, str]) -> Spec:
         roles=roles,
         honest_strategies=honest,
         mutator_hints=hints,
+        tokens=tokens,
+        setup_calls=setup_calls,
         expected_findings=expected,
     )
