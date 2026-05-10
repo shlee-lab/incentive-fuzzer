@@ -1,0 +1,57 @@
+contract: targets/tier_b_canonical/CompoundCErc20.sol
+contract_name: CompoundCErc20
+deploy_value_wei: 0
+deploy_args:
+  - "@@USDC"
+
+# Honest scenario mirrors SimpleLending: Borrower deposits, borrows, price
+# drops, then a separate Liquidator role calls liquidateBorrow. Expected:
+# NO finding above noise floor — the require(borrower != msg.sender) check
+# blocks self-liquidation; the only profitable role is Liquidator.
+
+tokens:
+  - name: USDC
+    decimals: 6
+    initial_balances:
+      __admin__: 200_000_000_000_000     # admin keeps half after seeding
+      Borrower:    1_000_000_000          # 1000 USDC
+      Liquidator:  1_000_000_000
+
+setup_calls:
+  - { function: USDC.transfer, args: { to: "@@self", amount: 100_000_000_000_000 } }   # 100M USDC liquidity (becomes totalCash via direct transfer; bumped via mint/sync below)
+  - { function: mint, args: { amount: 1 } }   # admin mints 1 share to bootstrap totalSupply non-zero (so subsequent mints use exchangeRate)
+
+roles:
+  - name: Borrower
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: USDC
+    callable_functions: [mint, redeem, borrow, repayBorrow, liquidateBorrow]
+  - name: Liquidator
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: USDC
+    callable_functions: [liquidateBorrow]
+
+honest_strategies:
+  Borrower:
+    actions:
+      - { function: mint,   args: { amount: 100_000_000 } }   # 100 USDC collateral
+      - { function: borrow, args: { amount: 60_000_000 } }    # 60 USDC borrow
+      - { function: simulate_price_drop, args: { factor: 0.7 } }
+      - { function: wait }
+  Liquidator:
+    actions:
+      - { function: liquidateBorrow, args: { borrower: "@Borrower", repayAmount: 30_000_000 } }   # repay 30 USDC = 50% closeFactor
+
+mutator_hints:
+  Borrower:
+    try_self_targeting: true
+    try_skip_actions: true
+    try_action_insertion: true
+    try_numeric_mutation: false
+  Liquidator:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: false
+    try_numeric_mutation: false
+
+expected_findings: []

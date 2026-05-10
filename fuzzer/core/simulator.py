@@ -279,6 +279,8 @@ class Simulator:
                 raise KeyError(f"unknown token reference: {v}")
             if v.startswith("@"):
                 role_name = _strip_role_suffix(v)
+                if role_name in ("__admin__", "admin"):
+                    return self.admin_address
                 if role_name in self.role_addresses:
                     return self.role_addresses[role_name]
                 raise KeyError(f"unknown role reference: {v}")

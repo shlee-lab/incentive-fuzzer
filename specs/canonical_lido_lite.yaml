@@ -1,0 +1,59 @@
+contract: targets/tier_b_canonical/LidoLite.sol
+contract_name: LidoLite
+deploy_value_wei: 0
+deploy_args:
+  - "@@stETH"             # underlying stake token (mock ETH)
+  - "@Validator"          # validator address (immutable)
+  - "@__admin__"          # admin/oracle (immutable)
+
+# Honest scenario: User stakes; admin distributes rewards via the
+# distribute_rewards-equivalent setup (handled below by reusing the
+# admin-funded path). Expected: NO finding — Validator is immutable so
+# User can't capture the fee, exchangeRate uses internal accumulator so
+# donation-style inflation is blocked, distributeRewards is admin-only.
+
+tokens:
+  - name: stETH
+    decimals: 18
+    initial_balances:
+      User:    1_000_000_000_000_000_000_000     # 1000 stETH
+      Validator: 0
+      __admin__: 1_000_000_000_000_000_000_000   # admin holds rewards
+
+roles:
+  - name: User
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: stETH
+    callable_functions: [deposit, withdraw, "stETH.transfer"]
+  - name: Validator
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: stETH
+    callable_functions: [deposit, withdraw, "stETH.transfer"]
+
+honest_strategies:
+  User:
+    actions:
+      - { function: deposit,  args: { amount: 100_000_000_000_000_000_000 }, phase: 0 }   # 100 stETH
+      - { function: withdraw, args: { shares: 100_000_000_000_000_000_000 }, phase: 5 }
+  Validator:
+    actions: []
+
+mutator_hints:
+  User:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: false
+    try_numeric_mutation: false
+    compound_beam_max_depth: 3
+    compound_beam_width: 25
+    max_candidates_per_role: 2500
+  Validator:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: false
+    try_numeric_mutation: false
+
+value_pool_extras:
+  - 1
+
+expected_findings: []
