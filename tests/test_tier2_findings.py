@@ -32,3 +32,17 @@ def test_referral_vault_finds_self_referral():
         "Self-referral deviation not found.\n"
         + "\n".join(f.summary() for f in findings)
     )
+
+
+@pytest.mark.timeout(180)
+def test_yield_farm_finds_deposit_flash_claim():
+    """C: Time-based + tokens. User flash-deposits before claim to inflate reward."""
+    report = Campaign("specs/yield_farm.yaml").run()
+    findings = report.profitable_deviations()
+    assert any(
+        _matches_expected(f, "User", ["deposit", "claim"], 1_000_000_000_000_000_000)  # 1 REWARD
+        for f in findings
+    ), (
+        "Deposit-flash-claim deviation not found.\n"
+        + "\n".join(f.summary() for f in findings)
+    )
