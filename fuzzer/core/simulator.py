@@ -129,13 +129,20 @@ class Simulator:
     # ------------------------------------------------------------------ anvil
     def _start_anvil(self) -> None:
         self._port = _free_port()
+        cmd = ["anvil", "--port", str(self._port), "--silent"]
+        if self.spec.fork is not None:
+            cmd += ["--fork-url", self.spec.fork.url]
+            if self.spec.fork.block is not None:
+                cmd += ["--fork-block-number", str(self.spec.fork.block)]
         self._anvil = subprocess.Popen(
-            ["anvil", "--port", str(self._port), "--silent"],
+            cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
         url = f"http://127.0.0.1:{self._port}"
-        deadline = time.time() + 10
+        # Fork mode needs longer to initialize (download genesis state from RPC).
+        startup_timeout = 30 if self.spec.fork is not None else 10
+        deadline = time.time() + startup_timeout
         while time.time() < deadline:
             try:
                 w3 = Web3(HTTPProvider(url, request_kwargs={"timeout": 2}))
@@ -162,6 +169,13 @@ class Simulator:
 
     def _deploy(self) -> None:
         assert self.w3 is not None and self._abi is not None and self._bytecode is not None
+        # Fork mode: attach to existing deployed contract.
+        if self.spec.contract_address is not None:
+            self.contract = self.w3.eth.contract(
+                address=self.w3.to_checksum_address(self.spec.contract_address),
+                abi=self._abi,
+            )
+            return
         self._set_balance(self.admin_address, self.spec.deploy_value_wei + 10**21)
         contract_factory = self.w3.eth.contract(abi=self._abi, bytecode=self._bytecode)
         ctor_abi = next((e for e in self._abi if e.get("type") == "constructor"), None)
@@ -184,10 +198,31 @@ class Simulator:
         self.contract = self.w3.eth.contract(address=receipt.contractAddress, abi=self._abi)
 
     def _deploy_tokens(self) -> None:
-        """Deploy each MockERC20 + mint initial balances. Approvals come later."""
+        """Deploy each MockERC20 + mint initial balances. In fork mode, attach to
+        existing token addresses and fund role balances via storage overwrite
+        (if storage_balance_slot specified) or via anvil_setBalance-equivalent
+        manipulation. Approvals come later."""
         if not self.spec.tokens:
             return
         for tdef in self.spec.tokens:
+            if tdef.address is not None:
+                # Fork mode: attach to existing token.
+                token = self.w3.eth.contract(
+                    address=self.w3.to_checksum_address(tdef.address),
+                    abi=self._erc20_abi,
+                )
+                self._token_contracts[tdef.name] = token
+                self._token_addresses[tdef.name] = self.w3.to_checksum_address(tdef.address)
+                if tdef.storage_balance_slot is not None:
+                    for role_name, amount in tdef.initial_balances.items():
+                        target = (
+                            self.admin_address if role_name == "__admin__"
+                            else self.role_addresses.get(role_name)
+                        )
+                        if target is None:
+                            raise KeyError(f"token {tdef.name} for unknown role {role_name}")
+                        self._set_erc20_balance(token.address, target, amount, tdef.storage_balance_slot)
+                continue
             factory = self.w3.eth.contract(abi=self._erc20_abi, bytecode=self._erc20_bytecode)
             tx = factory.constructor(tdef.name, tdef.name, tdef.decimals).transact(
                 {"from": self.admin_address}
@@ -205,6 +240,17 @@ class Simulator:
                         raise KeyError(f"token {tdef.name} initial_balance for unknown role {role_name}")
                 tx = token.functions.mint(target, amount).transact({"from": self.admin_address})
                 self.w3.eth.wait_for_transaction_receipt(tx)
+
+    def _set_erc20_balance(self, token_addr: str, owner: str, amount: int, slot: int) -> None:
+        """Force-set an ERC20 balance via anvil_setStorageAt. Storage slot for
+        `mapping(address => uint256) balanceOf` at base slot N is
+        keccak256(abi.encode(address, N))."""
+        from eth_utils import keccak
+        from eth_abi import encode
+        key = keccak(encode(["address", "uint256"], [owner, slot]))
+        slot_hex = "0x" + key.hex()
+        value_hex = "0x" + amount.to_bytes(32, "big").hex()
+        self.w3.provider.make_request("anvil_setStorageAt", [token_addr, slot_hex, value_hex])
 
     def _approve_tokens(self) -> None:
         """Auto-approve main contract for max from every role + admin."""

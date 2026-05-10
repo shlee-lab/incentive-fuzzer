@@ -43,6 +43,14 @@ class TokenDef:
     name: str
     decimals: int
     initial_balances: dict[str, int]   # role-name (or "__admin__") -> raw token units
+    address: str | None = None         # if set, attach to existing token at this address (fork mode)
+    storage_balance_slot: int | None = None  # storage slot for balanceOf mapping (fork mode token funding)
+
+
+@dataclass
+class ForkConfig:
+    url: str
+    block: int | None = None
 
 
 @dataclass
@@ -51,6 +59,8 @@ class Spec:
     contract_name: str
     deploy_value_wei: int
     deploy_args: list[Any]
+    contract_address: str | None  # if set, fork mode: attach instead of deploying
+    fork: ForkConfig | None
     roles: list[Role]
     honest_strategies: dict[str, Strategy]
     mutator_hints: dict[str, MutatorHints]
@@ -86,6 +96,12 @@ def load_spec(path: str | Path, role_addresses: dict[str, str]) -> Spec:
     contract_name = raw["contract_name"]
     deploy_value_wei = _coerce_int(raw.get("deploy_value_wei", 0))
     deploy_args = list(raw.get("deploy_args", []) or [])
+    contract_address = raw.get("contract_address")
+    fork_raw = raw.get("fork")
+    fork = ForkConfig(
+        url=fork_raw["url"],
+        block=int(fork_raw["block"]) if "block" in fork_raw else None,
+    ) if fork_raw else None
 
     roles: list[Role] = []
     for r in raw["roles"]:
@@ -155,6 +171,8 @@ def load_spec(path: str | Path, role_addresses: dict[str, str]) -> Spec:
                 name=t["name"],
                 decimals=int(t.get("decimals", 18)),
                 initial_balances=balances,
+                address=t.get("address"),
+                storage_balance_slot=int(t["storage_balance_slot"]) if "storage_balance_slot" in t else None,
             )
         )
 
@@ -169,6 +187,8 @@ def load_spec(path: str | Path, role_addresses: dict[str, str]) -> Spec:
         contract_name=contract_name,
         deploy_value_wei=deploy_value_wei,
         deploy_args=deploy_args,
+        contract_address=contract_address,
+        fork=fork,
         roles=roles,
         honest_strategies=honest,
         mutator_hints=hints,
