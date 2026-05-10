@@ -20,6 +20,10 @@ class MutatorHints:
     # compound_template: list of {fn: str, phase: int}; mutator generates the
     # cartesian product of arg variants across these slots in order.
     compound_template: list[dict] | None = None
+    # Autonomous depth-N: campaign runs a beam search, extending top-K stems
+    # by every single-action insertion at each depth. >=2 enables it.
+    compound_beam_max_depth: int = 0
+    compound_beam_width: int = 10
 
 
 @dataclass
@@ -121,6 +125,8 @@ def load_spec(path: str | Path, role_addresses: dict[str, str]) -> Spec:
             compound_phase_first=(int(body["compound_phase_first"]) if "compound_phase_first" in body else None),
             compound_phase_second=(int(body["compound_phase_second"]) if "compound_phase_second" in body else None),
             compound_template=(list(body["compound_template"]) if "compound_template" in body else None),
+            compound_beam_max_depth=int(body.get("compound_beam_max_depth", 0)),
+            compound_beam_width=int(body.get("compound_beam_width", 10)),
         )
     for role_name in role_lookup:
         hints.setdefault(role_name, MutatorHints())

@@ -49,6 +49,29 @@ def test_safemoon_finds_unauthorized_burn():
 
 
 @pytest.mark.timeout(300)
+def test_donation_vault_finds_depth3_inflation_autonomously():
+    """First-depositor inflation requires a 3-step Attacker plan
+    (deposit small, donate big, redeem) with the Victim's honest deposit
+    sandwiched between donate and redeem by phase ordering. Spec gives
+    only callable_functions and `compound_beam_max_depth: 3` — no
+    template. The fuzzer must synthesize the order.
+    """
+    report = Campaign("specs/donation_vault.yaml").run()
+    findings = report.profitable_deviations()
+    assert any(
+        _matches_expected(
+            f, "Attacker",
+            ["deposit", "donate", "redeem"],
+            50_000_000,  # 50 USDC
+        )
+        for f in findings
+    ), (
+        "Depth-3 donation inflation not found.\n"
+        + "\n".join(f.summary() for f in findings)
+    )
+
+
+@pytest.mark.timeout(300)
 def test_beanstalk_finds_majority_governance_drain_autonomously():
     """Beanstalk Farms (Apr 2022): no-snapshot governance lets transient majority drain treasury.
 
