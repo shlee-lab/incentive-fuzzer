@@ -128,6 +128,14 @@ def test_positive_control_buggy_contract_on_fork():
     )
 
 
+@pytest.mark.timeout(2400)
+def test_mainnet_sdai_no_tp():
+    """Real sDAI (0x83F2…BEeA) — MakerDAO savings ERC4626. Depth-3 beam,
+    storage-injected DAI balances for Victim + Attacker. ~27 min on
+    Alchemy free tier with 600 candidates."""
+    _assert_no_tp(_run_or_skip("specs/mainnet_sdai.yaml"))
+
+
 @pytest.mark.timeout(1800)
 def test_mainnet_lido_no_tp():
     """Real Lido stETH (0xae7a…fE84). Depth-3 beam search.
