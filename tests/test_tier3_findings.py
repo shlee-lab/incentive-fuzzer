@@ -49,21 +49,24 @@ def test_safemoon_finds_unauthorized_burn():
 
 
 @pytest.mark.timeout(300)
-def test_beanstalk_finds_majority_governance_drain():
+def test_beanstalk_finds_majority_governance_drain_autonomously():
     """Beanstalk Farms (Apr 2022): no-snapshot governance lets transient majority drain treasury.
 
-    Verified via 3-action compound mutation: deposit -> proposeAndExecute -> withdraw.
+    Spec gives only the contract API (callable_functions = [deposit, proposeAndExecute,
+    withdraw]) and turns on try_compound_pair_insertion. NO compound_template, NO phase
+    pinning — the fuzzer must discover the function order itself by trying all
+    (fn1, fn2) pairs.
     """
     report = Campaign("specs/beanstalk_gov.yaml").run()
     findings = report.profitable_deviations()
     assert any(
         _matches_expected(
             f, "Attacker",
-            ["deposit", "proposeAndExecute", "withdraw"],
+            ["deposit", "proposeAndExecute"],
             100_000_000_000_000_000_000,  # 100 TRSY
         )
         for f in findings
     ), (
-        "Beanstalk-style governance drain not found.\n"
+        "Beanstalk-style autonomous governance drain not found.\n"
         + "\n".join(f.summary() for f in findings)
     )
