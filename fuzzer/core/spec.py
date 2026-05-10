@@ -24,6 +24,10 @@ class MutatorHints:
     # by every single-action insertion at each depth. >=2 enables it.
     compound_beam_max_depth: int = 0
     compound_beam_width: int = 10
+    # Hard cap on candidates evaluated for this role across ALL mutation modes.
+    # 0 = unlimited. User-tunable knob for combinatorial control on large
+    # callable_functions / cross-contract specs.
+    max_candidates_per_role: int = 0
 
 
 @dataclass
@@ -127,6 +131,7 @@ def load_spec(path: str | Path, role_addresses: dict[str, str]) -> Spec:
             compound_template=(list(body["compound_template"]) if "compound_template" in body else None),
             compound_beam_max_depth=int(body.get("compound_beam_max_depth", 0)),
             compound_beam_width=int(body.get("compound_beam_width", 10)),
+            max_candidates_per_role=int(body.get("max_candidates_per_role", 0)),
         )
     for role_name in role_lookup:
         hints.setdefault(role_name, MutatorHints())

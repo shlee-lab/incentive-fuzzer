@@ -7,19 +7,30 @@ from ..core.spec import MutatorHints, Spec
 from ..core.strategy import Action, Strategy
 
 
-def _find_fn_abi(abi: list[dict], name: str) -> dict | None:
+def _find_fn_abi(
+    abi: list[dict],
+    name: str,
+    token_abis: dict[str, list[dict]] | None = None,
+) -> dict | None:
+    """Resolve `fn` against the main ABI, or `Token.fn` against `token_abis[Token]`."""
+    if "." in name and token_abis is not None:
+        tname, fn = name.split(".", 1)
+        t_abi = token_abis.get(tname)
+        if t_abi is not None:
+            for e in t_abi:
+                if e.get("type") == "function" and e["name"] == fn:
+                    return e
+        return None
     for e in abi:
         if e.get("type") == "function" and e["name"] == name:
             return e
     return None
 
 
-def _is_address_value(v: Any) -> bool:
-    return isinstance(v, str) and v.startswith("@")
-
-
-def _has_address_arg(action: Action, abi: list[dict]) -> bool:
-    fn = _find_fn_abi(abi, action.function)
+def _has_address_arg(
+    action: Action, abi: list[dict], token_abis: dict[str, list[dict]] | None = None
+) -> bool:
+    fn = _find_fn_abi(abi, action.function, token_abis)
     if fn is None:
         return False
     return any(inp["type"] == "address" for inp in fn.get("inputs", []))
@@ -59,11 +70,17 @@ def _collect_value_pool(spec: Spec, role: Role) -> list[int]:
     for v in spec.value_pool_extras:
         pool.add(int(v))
     pool.add(role.initial_eth)
+    pool.add(1)  # always include 1 wei (donation-attack staple)
     return sorted(pool)
 
 
-def _replace_address_args_with_self(action: Action, role: Role, abi: list[dict]) -> Action:
-    fn = _find_fn_abi(abi, action.function)
+def _replace_address_args_with_self(
+    action: Action,
+    role: Role,
+    abi: list[dict],
+    token_abis: dict[str, list[dict]] | None = None,
+) -> Action:
+    fn = _find_fn_abi(abi, action.function, token_abis)
     if fn is None:
         return action
     new_args = dict(action.args)
@@ -76,9 +93,14 @@ def _replace_address_args_with_self(action: Action, role: Role, abi: list[dict])
 
 
 def _build_default_args_variants(
-    fn_name: str, role: Role, abi: list[dict], value_pool: list[int], all_roles: list[Role] | None = None
+    fn_name: str,
+    role: Role,
+    abi: list[dict],
+    value_pool: list[int],
+    all_roles: list[Role] | None = None,
+    token_abis: dict[str, list[dict]] | None = None,
 ) -> list[dict[str, Any]]:
-    fn = _find_fn_abi(abi, fn_name)
+    fn = _find_fn_abi(abi, fn_name, token_abis)
     if fn is None:
         return []
     base: dict[str, Any] = {}
@@ -108,14 +130,17 @@ def _build_default_args_variants(
             variant = dict(base)
             variant[nk] = val
             variants.append(variant)
-    # Expand each variant to also try each OTHER role's address for each address key.
-    if address_keys and all_roles:
-        other_targets = [f"@{r.name}" for r in all_roles if r.name != role.name]
-        if other_targets:
+    # Address variants: try each OTHER role and "@@self" (the main contract).
+    if address_keys:
+        targets: list[str] = []
+        if all_roles:
+            targets.extend(f"@{r.name}" for r in all_roles if r.name != role.name)
+        targets.append("@@self")
+        if targets:
             extra = []
             for v in variants:
                 for ak in address_keys:
-                    for tgt in other_targets:
+                    for tgt in targets:
                         nv = dict(v)
                         nv[ak] = tgt
                         extra.append(nv)
@@ -132,7 +157,10 @@ def _build_default_args_variants(
 
 
 def generate_deviations(
-    spec: Spec, role_name: str, abi: list[dict]
+    spec: Spec,
+    role_name: str,
+    abi: list[dict],
+    token_abis: dict[str, list[dict]] | None = None,
 ) -> list[Strategy]:
     """Deterministically enumerate candidate deviation strategies for a role."""
     role = spec.role_by_name(role_name)
@@ -157,10 +185,10 @@ def generate_deviations(
     # 1. Self-targeting: rewrite address args of EXISTING actions to self.
     if hints.try_self_targeting:
         for i, action in enumerate(honest.actions):
-            if not _has_address_arg(action, abi):
+            if not _has_address_arg(action, abi, token_abis):
                 continue
             new_strat = honest.clone(new_name=f"self_target_{action.function}@{i}")
-            new_strat.actions[i] = _replace_address_args_with_self(action, role, abi)
+            new_strat.actions[i] = _replace_address_args_with_self(action, role, abi, token_abis)
             _add(new_strat)
 
     # 2. Action skipping.
@@ -170,17 +198,19 @@ def generate_deviations(
             del new_strat.actions[i]
             _add(new_strat)
 
-    # 3. Action insertion (for each callable fn, each position, each default-arg variant).
+    # 3. Action insertion.
     if hints.try_action_insertion:
         for fn_name in role.callable_functions:
-            variants = _build_default_args_variants(fn_name, role, abi, value_pool, spec.roles)
+            variants = _build_default_args_variants(
+                fn_name, role, abi, value_pool, spec.roles, token_abis
+            )
             for pos in range(len(honest.actions) + 1):
                 for k, args in enumerate(variants):
                     new_strat = honest.clone(new_name=f"insert_{fn_name}@{pos}#v{k}")
                     new_strat.actions.insert(pos, Action(function=fn_name, args=dict(args)))
                     _add(new_strat)
 
-    # 5. Compound pair insertion (two actions, each with its own phase tag).
+    # 5. Compound pair insertion (two actions at different phases).
     if hints.try_compound_pair_insertion:
         if hints.compound_phase_first is not None and hints.compound_phase_second is not None:
             phase_pairs = [(hints.compound_phase_first, hints.compound_phase_second)]
@@ -190,9 +220,13 @@ def generate_deviations(
             phase_pairs = [(d, d + 1)]
         for p1, p2 in phase_pairs:
             for fn1 in role.callable_functions:
-                variants1 = _build_default_args_variants(fn1, role, abi, value_pool, spec.roles)
+                variants1 = _build_default_args_variants(
+                    fn1, role, abi, value_pool, spec.roles, token_abis
+                )
                 for fn2 in role.callable_functions:
-                    variants2 = _build_default_args_variants(fn2, role, abi, value_pool, spec.roles)
+                    variants2 = _build_default_args_variants(
+                        fn2, role, abi, value_pool, spec.roles, token_abis
+                    )
                     for i, args1 in enumerate(variants1):
                         for j, args2 in enumerate(variants2):
                             new_strat = honest.clone(
@@ -210,7 +244,9 @@ def generate_deviations(
         for slot in slots:
             fn_name = slot["fn"]
             phase = int(slot["phase"])
-            variants = _build_default_args_variants(fn_name, role, abi, value_pool, spec.roles)
+            variants = _build_default_args_variants(
+                fn_name, role, abi, value_pool, spec.roles, token_abis
+            )
             slot_meta.append((fn_name, phase, variants))
         var_lists = [m[2] for m in slot_meta]
         for k, combo in enumerate(_product(*var_lists)):

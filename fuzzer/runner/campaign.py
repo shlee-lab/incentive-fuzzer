@@ -36,16 +36,35 @@ class Campaign:
         if self.verbose:
             print(msg, flush=True)
 
+    def _token_abis(self, sim: Simulator) -> dict[str, list[dict]]:
+        if not sim._token_addresses or sim._erc20_abi is None:
+            return {}
+        return {tname: sim._erc20_abi for tname in sim._token_addresses}
+
+    def _budget_remaining(self, hints, used: int) -> int | None:
+        cap = hints.max_candidates_per_role or 0
+        if cap <= 0:
+            return None
+        return max(0, cap - used)
+
     def _run_static_mutations(
         self, sim: Simulator, role: Role, honest_primary: int, eps: int, report: CampaignReport
-    ) -> None:
-        deviations = generate_deviations(sim.spec, role.name, sim._abi)
+    ) -> int:
+        hints = sim.spec.mutator_hints[role.name]
+        token_abis = self._token_abis(sim)
+        deviations = generate_deviations(sim.spec, role.name, sim._abi, token_abis)
+        budget = hints.max_candidates_per_role or len(deviations)
+        if budget < len(deviations):
+            self._log(f"[{role.name}] static budget cap: {budget}/{len(deviations)} candidates")
+            deviations = deviations[:budget]
         self._log(f"[{role.name}] {len(deviations)} static deviation candidates")
+        used = 0
         for dev in deviations:
             scenario = dict(sim.spec.honest_strategies)
             scenario[role.name] = dev
             result = sim.execute_scenario(scenario)
             report.candidates_evaluated += 1
+            used += 1
             payoff = result.primary_for(role)
             diff = payoff - honest_primary
             if diff >= eps and diff > 0:
@@ -61,9 +80,16 @@ class Campaign:
                 )
                 report.findings.append(finding)
                 self._log(f"  + {finding.summary()}")
+        return used
 
     def _run_beam_search(
-        self, sim: Simulator, role: Role, honest_primary: int, eps: int, report: CampaignReport
+        self,
+        sim: Simulator,
+        role: Role,
+        honest_primary: int,
+        eps: int,
+        report: CampaignReport,
+        budget: int | None = None,
     ) -> None:
         """Autonomous depth-N compound discovery via beam search.
 
@@ -75,11 +101,14 @@ class Campaign:
         hints = sim.spec.mutator_hints[role.name]
         max_depth = hints.compound_beam_max_depth
         beam_width = hints.compound_beam_width or 10
+        token_abis = self._token_abis(sim)
 
         value_pool = _collect_value_pool(sim.spec, role)
         actions_pool: list[tuple[str, dict]] = []
         for fn in role.callable_functions:
-            for args in _build_default_args_variants(fn, role, sim._abi, value_pool, sim.spec.roles):
+            for args in _build_default_args_variants(
+                fn, role, sim._abi, value_pool, sim.spec.roles, token_abis
+            ):
                 actions_pool.append((fn, args))
 
         role_idx = next(i for i, r in enumerate(sim.spec.roles) if r.name == role.name)
@@ -94,12 +123,20 @@ class Campaign:
                 f"{a.function}@{a.phase}({sorted(a.args.items())})" for a in s.actions
             )
 
+        used = 0
         for d in range(1, max_depth + 1):
+            if budget is not None and used >= budget:
+                self._log(f"[{role.name}] beam depth {d}: budget exhausted ({used}), stopping")
+                return
             phase_d = base_phase + (d - 1)
             scored: list[tuple[float, Strategy]] = []
             self._log(f"[{role.name}] beam depth {d}: {len(beam)} stems x {len(actions_pool)} actions")
             for stem in beam:
+                if budget is not None and used >= budget:
+                    break
                 for fn, args in actions_pool:
+                    if budget is not None and used >= budget:
+                        break
                     extended = stem.clone(new_name=f"beam_d{d}_{fn}_{role.name}")
                     extended.actions.append(Action(function=fn, args=dict(args), phase=phase_d))
                     key = _strat_key(extended)
@@ -111,6 +148,7 @@ class Campaign:
                     scenario[role.name] = extended
                     result = sim.execute_scenario(scenario)
                     report.candidates_evaluated += 1
+                    used += 1
 
                     payoff = result.primary_for(role)
                     profit = payoff - honest_primary
@@ -159,9 +197,14 @@ class Campaign:
                     continue
                 eps = self.epsilon_wei if self.epsilon_wei is not None else _default_epsilon(role)
                 hints = sim.spec.mutator_hints[role.name]
-                self._run_static_mutations(sim, role, honest_primary.get(role.name, 0), eps, report)
+                used = self._run_static_mutations(
+                    sim, role, honest_primary.get(role.name, 0), eps, report
+                )
                 if hints.compound_beam_max_depth and hints.compound_beam_max_depth > 0:
-                    self._run_beam_search(sim, role, honest_primary.get(role.name, 0), eps, report)
+                    remaining = self._budget_remaining(hints, used)
+                    self._run_beam_search(
+                        sim, role, honest_primary.get(role.name, 0), eps, report, budget=remaining
+                    )
 
             return report
 

@@ -74,6 +74,29 @@ def test_safemoon_finds_unauthorized_burn():
 
 
 @pytest.mark.timeout(300)
+def test_donation_vault_finds_depth3_inflation_via_cross_contract_call():
+    """Same DonationVault, but the spec does NOT expose the convenience
+    `donate(amount)` function. The fuzzer must synthesize the equivalent
+    attack using a raw `USDC.transfer(@@self, X)` cross-contract call as
+    the donation step. Verifies (a) the mutator generates Token.fn variants
+    and (b) `@@self` resolves correctly to the deployed contract address.
+    """
+    report = Campaign("specs/donation_vault_xc.yaml").run()
+    findings = report.profitable_deviations()
+    assert any(
+        _matches_expected(
+            f, "Attacker",
+            ["deposit", "USDC.transfer", "redeem"],
+            50_000_000,  # 50 USDC
+        )
+        for f in findings
+    ), (
+        "Cross-contract donation inflation not found.\n"
+        + "\n".join(f.summary() for f in findings)
+    )
+
+
+@pytest.mark.timeout(300)
 def test_donation_vault_finds_depth3_inflation_autonomously():
     """First-depositor inflation requires a 3-step Attacker plan
     (deposit small, donate big, redeem) with the Victim's honest deposit
