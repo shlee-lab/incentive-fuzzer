@@ -73,12 +73,31 @@ class Simulator:
             import yaml
             raw = yaml.safe_load(f)
         role_names = [r["name"] for r in raw["roles"]]
-        if len(role_names) > len(ANVIL_ACCOUNTS) - 1:
-            raise ValueError("more roles than available anvil accounts")
-        self.role_addresses: dict[str, str] = {
-            name: ANVIL_ACCOUNTS[i + 1][0] for i, name in enumerate(role_names)
-        }
-        self.admin_address = ANVIL_ACCOUNTS[0][0]
+        if raw.get("fork") is not None:
+            # Fork mode: anvil pre-funded accounts may have code already
+            # deployed on mainnet (someone mined to those deterministic addrs
+            # via CREATE2). Their fallback can OOG WETH9's 2300-gas transfer.
+            # Generate fresh deterministic addresses keyed off the spec path
+            # so they're stable across re-runs but guaranteed unused on
+            # mainnet. anvil_impersonateAccount will unlock them at setup.
+            from eth_utils import keccak, to_checksum_address
+            seed_base = str(self.spec_path)
+            self.role_addresses: dict[str, str] = {
+                name: to_checksum_address("0x" + keccak((seed_base + ":" + name).encode())[-20:].hex())
+                for name in role_names
+            }
+            self.admin_address = to_checksum_address(
+                "0x" + keccak((seed_base + ":__admin__").encode())[-20:].hex()
+            )
+            self._fork_impersonate = True
+        else:
+            if len(role_names) > len(ANVIL_ACCOUNTS) - 1:
+                raise ValueError("more roles than available anvil accounts")
+            self.role_addresses: dict[str, str] = {
+                name: ANVIL_ACCOUNTS[i + 1][0] for i, name in enumerate(role_names)
+            }
+            self.admin_address = ANVIL_ACCOUNTS[0][0]
+            self._fork_impersonate = False
 
         from .spec import load_spec
         self.spec: Spec = load_spec(self.spec_path, self.role_addresses)
@@ -273,8 +292,15 @@ class Simulator:
     def setup(self) -> None:
         self._compile()
         self._start_anvil()
+        if self._fork_impersonate:
+            # Unlock fresh addresses so eth_sendTransaction from them works
+            # without a private key.
+            for addr in [self.admin_address] + list(self.role_addresses.values()):
+                self.w3.provider.make_request("anvil_impersonateAccount", [addr])
         for r in self.spec.roles:
             self._set_balance(r.address, r.initial_eth)
+        if self._fork_impersonate:
+            self._set_balance(self.admin_address, 10**21)
         self._deploy_tokens()  # tokens first; main contract may reference them in constructor
         self._deploy()
         self._approve_tokens()
