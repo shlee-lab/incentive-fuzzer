@@ -2,7 +2,7 @@ contract: targets/tier_b_canonical/UniswapV2Pair.sol     # ABI shared with Unisw
 contract_name: UniswapV2Pair
 contract_address: "0x397FF1542f962076d0BFE58eA045FfA2d347ACa0"   # Sushi V2 USDC/WETH on mainnet
 fork:
-  url: "https://ethereum-rpc.publicnode.com"
+  url: "${ALCHEMY_ETH_RPC}"
 
 roles:
   - name: Attacker

@@ -2,7 +2,7 @@ contract: targets/tier_b_canonical/UniswapV2Pair.sol     # ABI source (our 0.8 p
 contract_name: UniswapV2Pair
 contract_address: "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc"   # canonical USDC/WETH V2 Pair on mainnet
 fork:
-  url: "https://ethereum-rpc.publicnode.com"
+  url: "${ALCHEMY_ETH_RPC}"
   # block omitted -> anvil uses latest. Free public RPCs typically retain only
   # ~128 blocks of historical state, so pinning a specific old block fails.
 

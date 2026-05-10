@@ -7,3 +7,5 @@ out/
 cache/
 .pytest_cache/
 broadcast/
+.env
+.env.local

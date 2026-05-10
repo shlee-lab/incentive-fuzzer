@@ -1,0 +1,29 @@
+contract: targets/tier_c_mainnet/Lido.sol
+contract_name: Lido
+contract_address: "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84"
+fork:
+  url: "${ALCHEMY_ETH_RPC}"
+
+roles:
+  - name: User
+    initial_eth_wei: 100_000_000_000_000_000_000     # 100 ETH
+    primary_asset: ETH
+    callable_functions: [submit, transfer, transferFrom, approve, transferShares]
+
+honest_strategies:
+  User:
+    actions:
+      - { function: submit, args: { _referral: "0x0000000000000000000000000000000000000000", value_wei: 1_000_000_000_000_000_000 } }   # 1 ETH
+
+mutator_hints:
+  User:
+    try_self_targeting: true
+    try_skip_actions: true
+    try_action_insertion: true
+    try_numeric_mutation: false
+    try_compound_pair_insertion: true       # depth 2
+    compound_beam_max_depth: 3              # autonomous depth-N
+    compound_beam_width: 15
+    max_candidates_per_role: 600
+
+expected_findings: []

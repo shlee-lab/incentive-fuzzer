@@ -98,10 +98,21 @@ def load_spec(path: str | Path, role_addresses: dict[str, str]) -> Spec:
     deploy_args = list(raw.get("deploy_args", []) or [])
     contract_address = raw.get("contract_address")
     fork_raw = raw.get("fork")
-    fork = ForkConfig(
-        url=fork_raw["url"],
-        block=int(fork_raw["block"]) if "block" in fork_raw else None,
-    ) if fork_raw else None
+    fork = None
+    if fork_raw:
+        # Expand ${ENV_VAR} in fork URL (so keys never end up in committed YAML).
+        import os, re as _re
+        url = fork_raw["url"]
+        def _sub(m):
+            v = os.environ.get(m.group(1), "")
+            if not v:
+                raise RuntimeError(f"env var {m.group(1)} required by spec but not set")
+            return v
+        url = _re.sub(r"\$\{([A-Z0-9_]+)\}", _sub, url)
+        fork = ForkConfig(
+            url=url,
+            block=int(fork_raw["block"]) if "block" in fork_raw else None,
+        )
 
     roles: list[Role] = []
     for r in raw["roles"]:

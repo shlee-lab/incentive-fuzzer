@@ -2,7 +2,7 @@ contract: targets/tier_c_mainnet/WETH9.sol
 contract_name: WETH9
 contract_address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
 fork:
-  url: "https://ethereum-rpc.publicnode.com"
+  url: "${ALCHEMY_ETH_RPC}"
 
 roles:
   - name: User

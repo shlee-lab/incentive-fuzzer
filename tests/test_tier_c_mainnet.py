@@ -1,14 +1,19 @@
 """Tier C: mainnet fork validation.
 
 Runs the fuzzer against contracts ACTUALLY DEPLOYED on Ethereum mainnet,
-via `anvil --fork-url <public RPC>`. Replaces our vendored ports with the
-real on-chain bytecode and state.
+via `anvil --fork-url <RPC>`. Replaces our vendored ports with the real
+on-chain bytecode and state.
 
-These tests REQUIRE network access. Public RPCs (publicnode.com) typically
-retain only the most recent ~128 blocks, so the fork uses "latest" rather
-than a pinned historical block. If the RPC is unreachable, the simulator
-fails to initialize anvil; we treat that as a SKIP rather than a hard
-failure so CI without internet doesn't break.
+These tests REQUIRE network access. RPC URL is read from environment
+(spec uses ${ALCHEMY_ETH_RPC} et al). If the RPC is unreachable, the
+simulator fails to initialize anvil; we treat that as a SKIP rather
+than a hard failure so CI without internet doesn't break.
+
+We assert NO TRUE-POSITIVE findings (TP_value_transfer or
+TP_protocol_drain). OPT_OUT / STRATEGIC findings are tolerated — those
+indicate the role chose not to participate or used the protocol's own
+callable functions in a non-honest but legal way, not an exploit of
+its invariants.
 """
 from __future__ import annotations
 
@@ -26,49 +31,45 @@ def _run_or_skip(spec_path: str):
         raise
 
 
+def _assert_no_tp(report) -> None:
+    tps = report.true_positives()
+    assert not tps, (
+        "Mainnet contract should produce no TP findings; got:\n"
+        + "\n".join(f.summary() for f in tps)
+    )
+
+
 @pytest.mark.timeout(600)
-def test_mainnet_uniswap_v2_usdc_weth_no_finding():
+def test_mainnet_uniswap_v2_usdc_weth_no_tp():
     """Real Uniswap V2 USDC/WETH pair (0xB4e1…9Dc)."""
-    report = _run_or_skip("specs/mainnet_uniswap_v2_usdc_weth.yaml")
-    fs = report.profitable_deviations()
-    assert not fs, (
-        f"Mainnet Uniswap V2 USDC/WETH should be FP-clean; got:\n"
-        + "\n".join(f.summary() for f in fs)
-    )
+    _assert_no_tp(_run_or_skip("specs/mainnet_uniswap_v2_usdc_weth.yaml"))
 
 
 @pytest.mark.timeout(600)
-def test_mainnet_weth9_no_finding():
-    """Real WETH9 (0xC02a…56Cc2). Canonical wrapper, ~30 LOC; no exploits."""
-    report = _run_or_skip("specs/mainnet_weth9.yaml")
-    fs = report.profitable_deviations()
-    assert not fs, (
-        f"Mainnet WETH9 should be FP-clean; got:\n"
-        + "\n".join(f.summary() for f in fs)
-    )
+def test_mainnet_weth9_no_tp():
+    """Real WETH9 (0xC02a…56Cc2). Canonical wrapper."""
+    _assert_no_tp(_run_or_skip("specs/mainnet_weth9.yaml"))
 
 
 @pytest.mark.timeout(600)
-def test_mainnet_sushiswap_v2_usdc_weth_no_finding():
+def test_mainnet_sushiswap_v2_usdc_weth_no_tp():
     """Real Sushiswap V2 USDC/WETH (0x397F…ACa0) — UniV2 fork."""
-    report = _run_or_skip("specs/mainnet_sushiswap_v2_usdc_weth.yaml")
-    fs = report.profitable_deviations()
-    assert not fs, (
-        f"Mainnet Sushiswap V2 should be FP-clean; got:\n"
-        + "\n".join(f.summary() for f in fs)
-    )
+    _assert_no_tp(_run_or_skip("specs/mainnet_sushiswap_v2_usdc_weth.yaml"))
 
 
 @pytest.mark.timeout(600)
-def test_mainnet_curve_3pool_no_finding():
-    """Real Curve 3pool (0xbEbc…1C7) — DAI/USDC/USDT stable swap (Vyper).
+def test_mainnet_curve_3pool_no_tp():
+    """Real Curve 3pool (0xbEbc…1C7) — DAI/USDC/USDT stable swap (Vyper)."""
+    _assert_no_tp(_run_or_skip("specs/mainnet_curve_3pool.yaml"))
 
-    Different invariant math than Uniswap V2 (sum + product). Validates
-    framework handles non-constant-product AMMs at the ABI level.
+
+@pytest.mark.timeout(1800)
+def test_mainnet_lido_no_tp():
+    """Real Lido stETH (0xae7a…fE84). Depth-3 beam search.
+
+    Heaviest test in this suite (~17 min on Alchemy free tier) — proxy
+    contract with substantial state-read fan-out per call. Verifies the
+    framework handles deeper compound mutations on a real production
+    proxy contract.
     """
-    report = _run_or_skip("specs/mainnet_curve_3pool.yaml")
-    fs = report.profitable_deviations()
-    assert not fs, (
-        f"Mainnet Curve 3pool should be FP-clean; got:\n"
-        + "\n".join(f.summary() for f in fs)
-    )
+    _assert_no_tp(_run_or_skip("specs/mainnet_lido.yaml"))
