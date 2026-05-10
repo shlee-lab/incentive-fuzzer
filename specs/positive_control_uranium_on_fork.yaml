@@ -1,0 +1,56 @@
+contract: targets/tier3_reproductions/UraniumPair.sol
+contract_name: UraniumPair
+deploy_value_wei: 0
+deploy_args:
+  - "@@TKA"
+  - "@@TKB"
+
+# POSITIVE CONTROL: same buggy UraniumPair we use in Tier 3-A, but deployed
+# ON TOP of a forked mainnet anvil session. If the fuzzer still finds the
+# K-invariant drain through the full fork-mode codepath (impersonation,
+# fresh-address generation, env-var URL expansion, etc.), then fork mode
+# preserves discovery — meaning Tier C's 0-TP results on real contracts
+# are real "no bug" outcomes, not a fork-mode silent failure.
+fork:
+  url: "${ALCHEMY_ETH_RPC}"
+
+tokens:
+  - name: TKA
+    decimals: 18
+    initial_balances:
+      __admin__: 10_000_000_000_000_000_000_000
+      Attacker: 0
+  - name: TKB
+    decimals: 18
+    initial_balances:
+      __admin__: 10_000_000_000_000_000_000_000
+
+setup_calls:
+  - { function: addLiquidity, args: { amount0: 1_000_000_000_000_000_000_000, amount1: 1_000_000_000_000_000_000_000 } }
+  - { function: TKB.transfer, args: { to: "@@self", amount: 1 } }
+
+roles:
+  - name: Attacker
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: TKA
+    callable_functions: [swap]
+
+honest_strategies:
+  Attacker:
+    actions: []
+
+mutator_hints:
+  Attacker:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: true
+    try_numeric_mutation: false
+
+value_pool_extras:
+  - 990_000_000_000_000_000_000
+
+expected_findings:
+  - role: Attacker
+    deviation_must_contain: [swap]
+    payoff_higher_than_honest: true
+    min_payoff_diff_wei: 100_000_000_000_000_000_000

@@ -63,6 +63,36 @@ def test_mainnet_curve_3pool_no_tp():
     _assert_no_tp(_run_or_skip("specs/mainnet_curve_3pool.yaml"))
 
 
+@pytest.mark.timeout(120)
+def test_positive_control_buggy_contract_on_fork():
+    """POSITIVE CONTROL — proves fork mode preserves bug-finding.
+
+    Deploys our known-buggy UraniumPair (Tier 3-A's reproduction of the
+    Uranium Finance K-invariant typo) ON TOP of a forked mainnet anvil
+    session. Goes through every fork-mode codepath: env-var URL
+    expansion, fresh-address generation, anvil_impersonateAccount.
+
+    If this assertion fails, fork mode has a silent regression — and
+    that means the 0-TP results we report on real mainnet contracts may
+    be artifacts, not genuine "no bug" outcomes. If it passes, fork
+    infra is exonerated and the mainnet 0-TPs reflect real protocol
+    safety.
+    """
+    report = _run_or_skip("specs/positive_control_uranium_on_fork.yaml")
+    tps = report.true_positives()
+    assert tps, (
+        "POSITIVE CONTROL FAILED: fork-mode UraniumPair should still "
+        "yield TP findings (~990 TKA drain). Got 0 TPs — fork mode may "
+        "be suppressing discovery. Re-run Tier 3 specs without fork to "
+        "isolate."
+    )
+    # Drain should be at the full ~990 TKA magnitude.
+    assert max(f.payoff_diff_wei for f in tps) > 100 * 10**18, (
+        "Drain magnitude below expected ~990 TKA; fork mode may be "
+        "altering reserves or balance reads."
+    )
+
+
 @pytest.mark.timeout(1800)
 def test_mainnet_lido_no_tp():
     """Real Lido stETH (0xae7a…fE84). Depth-3 beam search.
