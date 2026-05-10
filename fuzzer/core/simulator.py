@@ -252,12 +252,19 @@ class Simulator:
         self.w3.provider.make_request("evm_revert", [snap_id])
 
     def _snapshot_balances(self) -> dict[str, dict[str, int]]:
+        """Per-role + main-contract asset balances. Contract is keyed `__contract__`."""
         out: dict[str, dict[str, int]] = {}
         for r in self.spec.roles:
             assets: dict[str, int] = {"ETH": self.w3.eth.get_balance(r.address)}
             for tname, token in self._token_contracts.items():
                 assets[tname] = token.functions.balanceOf(r.address).call()
             out[r.name] = assets
+        contract_assets: dict[str, int] = {
+            "ETH": self.w3.eth.get_balance(self.contract.address)
+        }
+        for tname, token in self._token_contracts.items():
+            contract_assets[tname] = token.functions.balanceOf(self.contract.address).call()
+        out["__contract__"] = contract_assets
         return out
 
     # ------------------------------------------------------------------ args

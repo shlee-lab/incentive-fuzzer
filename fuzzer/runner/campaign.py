@@ -11,7 +11,7 @@ from ..mutator.strategy_mutator import (
     _collect_value_pool,
     generate_deviations,
 )
-from ..reporter.report import CampaignReport, Finding
+from ..reporter.report import CampaignReport, Finding, classify_finding, coverage_signature
 
 
 def _default_epsilon(role: Role) -> int:
@@ -78,6 +78,10 @@ class Campaign:
                     action_log=result.action_log,
                     reverts=result.reverts,
                 )
+                finding.label, finding.label_reason = classify_finding(
+                    finding, sim.spec, report.honest_asset_deltas, result.asset_deltas
+                )
+                finding.coverage = coverage_signature(result.action_log)
                 report.findings.append(finding)
                 self._log(f"  + {finding.summary()}")
         return used
@@ -117,6 +121,13 @@ class Campaign:
         honest_strat = sim.spec.honest_strategies[role.name]
         beam: list[Strategy] = [honest_strat]
         seen_keys: set[str] = set()
+        # Coverage already exercised by honest baseline — used to compute novelty.
+        honest_cov = frozenset()
+        try:
+            honest_res = sim.execute_scenario(sim.spec.honest_strategies)
+            honest_cov = coverage_signature(honest_res.action_log)
+        except Exception:
+            pass
 
         def _strat_key(s: Strategy) -> str:
             return ";".join(
@@ -153,6 +164,9 @@ class Campaign:
                     payoff = result.primary_for(role)
                     profit = payoff - honest_primary
 
+                    cov = coverage_signature(result.action_log)
+                    novelty = len(cov - honest_cov)
+
                     if profit >= eps and profit > 0:
                         finding = Finding(
                             role=role.name,
@@ -164,6 +178,10 @@ class Campaign:
                             action_log=result.action_log,
                             reverts=result.reverts,
                         )
+                        finding.label, finding.label_reason = classify_finding(
+                            finding, sim.spec, report.honest_asset_deltas, result.asset_deltas
+                        )
+                        finding.coverage = cov
                         report.findings.append(finding)
                         self._log(f"  + beam d{d} {finding.summary()}")
 
@@ -173,7 +191,10 @@ class Campaign:
                         state_change = sum(
                             abs(v) for v in result.asset_deltas.get(role.name, {}).values()
                         )
-                        score = float(state_change)
+                        # Coverage-guided bonus: prefer stems exercising new fns vs honest.
+                        # 1e20 per novel function dwarfs any plausible state_change in raw
+                        # token units but stays below the profit-found threshold.
+                        score = float(state_change) + 1e20 * novelty
                     scored.append((score, extended))
 
             scored.sort(key=lambda x: x[0], reverse=True)
