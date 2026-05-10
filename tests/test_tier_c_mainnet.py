@@ -64,6 +64,41 @@ def test_mainnet_curve_3pool_no_tp():
 
 
 @pytest.mark.timeout(120)
+def test_positive_control_weth_storage_inject():
+    """POSITIVE CONTROL #2 — proves fuzzer finds exploits in REAL mainnet
+    bytecode when state allows.
+
+    Attaches to real WETH9 (0xC02a…56Cc2) and injects 1000 WETH into
+    Attacker's `balanceOf` slot via anvil_setStorageAt. Fuzzer must
+    discover that `withdraw(1000)` converts the injected WETH into real
+    ETH from WETH9's actual ~3M ETH pool. Proves: real on-chain
+    bytecode + injected state → fuzzer finds the drain.
+    """
+    report = _run_or_skip("specs/positive_control_weth_storage_inject.yaml")
+    tps = report.true_positives()
+    assert tps, "Storage-injection drain not found — real-contract path broken?"
+    assert max(f.payoff_diff_wei for f in tps) > 100 * 10**18, (
+        "Drain magnitude below 100 ETH — fork-mode balance reads may be off."
+    )
+
+
+@pytest.mark.timeout(600)
+def test_positive_control_donation_depth3_on_fork():
+    """POSITIVE CONTROL #3 — depth-3 multi-step discovery via beam search
+    through fork mode. Same DonationVault inflation attack as Tier 3,
+    but deployed atop a mainnet fork session. Proves compound mutation
+    + coverage-novelty scoring survives fork."""
+    report = _run_or_skip("specs/positive_control_donation_on_fork.yaml")
+    tps = report.true_positives()
+    assert tps, "Depth-3 donation drain not found through fork."
+    matching = [
+        f for f in tps
+        if {"deposit", "donate", "redeem"} <= {a.function for a in f.deviation.actions}
+    ]
+    assert matching, "TP findings exist but none match the expected attack sequence."
+
+
+@pytest.mark.timeout(120)
 def test_positive_control_buggy_contract_on_fork():
     """POSITIVE CONTROL — proves fork mode preserves bug-finding.
 
