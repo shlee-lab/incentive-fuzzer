@@ -128,6 +128,29 @@ def test_positive_control_buggy_contract_on_fork():
     )
 
 
+@pytest.mark.timeout(300)
+def test_mainnet_weth9_reentrancy_blocked():
+    """Mainnet WETH9 + reentrancy attacker class. WETH9 uses 2300-gas
+    transfer + checks-effects-interactions, blocking reentrancy. The
+    framework should run the full reentrancy attack-class machinery
+    (role contract deployment via anvil_setCode, impersonation,
+    callback-aware mutations) and correctly find ZERO TPs."""
+    _assert_no_tp(_run_or_skip("specs/mainnet_weth9_reentrancy.yaml"))
+
+
+@pytest.mark.timeout(60)
+def test_positive_control_reentrancy():
+    """POSITIVE CONTROL #4: textbook reentrancy bug on VulnVault. Proves
+    the new attack class (contract-deployed roles + callback-driven
+    mutations) actually finds reentrancy when it exists."""
+    report = _run_or_skip("specs/positive_control_reentrancy.yaml")
+    tps = report.true_positives()
+    assert tps, "Reentrancy drain not found on vulnerable vault."
+    assert max(f.payoff_diff_wei for f in tps) > 30 * 10**18, (
+        "Reentrancy drain below 30 ETH — drain depth may be insufficient."
+    )
+
+
 @pytest.mark.timeout(2400)
 def test_mainnet_sdai_no_tp():
     """Real sDAI (0x83F2…BEeA) — MakerDAO savings ERC4626. Depth-3 beam,
