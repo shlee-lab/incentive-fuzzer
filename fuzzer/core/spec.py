@@ -127,6 +127,9 @@ def load_spec(path: str | Path, role_addresses: dict[str, str]) -> Spec:
                 callable_functions=r["callable_functions"],
                 primary_asset=r.get("primary_asset", "ETH"),
                 default_phase=int(r.get("default_phase", -1)),
+                code_path=r.get("code_path"),
+                code_name=r.get("code_name"),
+                code_ctor_args=tuple(r.get("code_ctor_args", []) or []),
             )
         )
     role_lookup = {r.name: r for r in roles}

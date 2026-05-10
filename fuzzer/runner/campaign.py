@@ -47,12 +47,20 @@ class Campaign:
             return None
         return max(0, cap - used)
 
+    def _role_extended_abi(self, sim: Simulator, role: Role) -> list[dict]:
+        """If role has code deployed (role.code_path set), merge its ABI into
+        the main contract ABI so the mutator can discover its functions."""
+        if role.name in sim._role_contracts:
+            return list(sim._abi) + list(sim._role_contracts[role.name].abi)
+        return sim._abi
+
     def _run_static_mutations(
         self, sim: Simulator, role: Role, honest_primary: int, eps: int, report: CampaignReport
     ) -> int:
         hints = sim.spec.mutator_hints[role.name]
         token_abis = self._token_abis(sim)
-        deviations = generate_deviations(sim.spec, role.name, sim._abi, token_abis)
+        abi = self._role_extended_abi(sim, role)
+        deviations = generate_deviations(sim.spec, role.name, abi, token_abis)
         budget = hints.max_candidates_per_role or len(deviations)
         if budget < len(deviations):
             self._log(f"[{role.name}] static budget cap: {budget}/{len(deviations)} candidates")
@@ -109,9 +117,10 @@ class Campaign:
 
         value_pool = _collect_value_pool(sim.spec, role)
         actions_pool: list[tuple[str, dict]] = []
+        abi = self._role_extended_abi(sim, role)
         for fn in role.callable_functions:
             for args in _build_default_args_variants(
-                fn, role, sim._abi, value_pool, sim.spec.roles, token_abis
+                fn, role, abi, value_pool, sim.spec.roles, token_abis
             ):
                 actions_pool.append((fn, args))
 

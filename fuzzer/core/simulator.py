@@ -112,6 +112,7 @@ class Simulator:
         self._erc20_bytecode: str | None = None
         self._token_contracts: dict[str, Contract] = {}
         self._token_addresses: dict[str, str] = {}
+        self._role_contracts: dict[str, Contract] = {}  # role -> contract instance (when role has code)
 
     # ------------------------------------------------------------------ build
     def _compile(self) -> None:
@@ -293,18 +294,67 @@ class Simulator:
         self._compile()
         self._start_anvil()
         if self._fork_impersonate:
-            # Unlock fresh addresses so eth_sendTransaction from them works
-            # without a private key.
             for addr in [self.admin_address] + list(self.role_addresses.values()):
                 self.w3.provider.make_request("anvil_impersonateAccount", [addr])
         for r in self.spec.roles:
             self._set_balance(r.address, r.initial_eth)
         if self._fork_impersonate:
             self._set_balance(self.admin_address, 10**21)
-        self._deploy_tokens()  # tokens first; main contract may reference them in constructor
+        self._deploy_tokens()
         self._deploy()
         self._approve_tokens()
+        self._deploy_role_contracts()
         self._run_setup_calls()
+
+    def _deploy_role_contracts(self) -> None:
+        """Deploy bytecode at role addresses that have code_path set.
+
+        For each such role, compile + load artifact, deploy from a fresh
+        deployer account, then anvil_setCode at the role's address to
+        place the runtime bytecode there. anvil_impersonateAccount is
+        used so the role can still send txs from that address.
+        """
+        for r in self.spec.roles:
+            if not r.code_path:
+                continue
+            # Locate compiled artifact.
+            from pathlib import Path
+            code_path = Path(r.code_path)
+            code_name = r.code_name or code_path.stem
+            artifact = self.project_root / "out" / code_path.name / f"{code_name}.json"
+            if not artifact.exists():
+                raise FileNotFoundError(f"role {r.name} code artifact not found: {artifact}")
+            import json
+            data = json.loads(artifact.read_text())
+            abi = data["abi"]
+            bytecode = data["bytecode"]["object"]
+            # Deploy from admin to get the deployed runtime code.
+            ctor_inputs = [e for e in abi if e.get("type") == "constructor"]
+            ctor_inputs = ctor_inputs[0]["inputs"] if ctor_inputs else []
+            resolved = []
+            for inp, raw_arg in zip(ctor_inputs, r.code_ctor_args):
+                resolved.append(self._resolve_arg(raw_arg, inp["type"]))
+            factory = self.w3.eth.contract(abi=abi, bytecode=bytecode)
+            deploy_tx = factory.constructor(*resolved).transact({"from": self.admin_address})
+            rcpt = self.w3.eth.wait_for_transaction_receipt(deploy_tx)
+            deployed_addr = rcpt.contractAddress
+            # Copy runtime code over to the role's address. Preserves the
+            # role address as the contract identity; constructor effects
+            # have already run during the temporary deployment above.
+            runtime_code = self.w3.eth.get_code(deployed_addr)
+            # web3.py >=6 HexBytes.hex() returns with "0x" prefix already.
+            hex_str = runtime_code.hex()
+            if not hex_str.startswith("0x"):
+                hex_str = "0x" + hex_str
+            resp = self.w3.provider.make_request("anvil_setCode", [r.address, hex_str])
+            if "error" in resp:
+                raise RuntimeError(f"anvil_setCode failed: {resp['error']}")
+            # Ensure the role address can still originate txs.
+            self.w3.provider.make_request("anvil_impersonateAccount", [r.address])
+            # Re-fund (anvil_setCode may not touch balance; this is safe).
+            self._set_balance(r.address, r.initial_eth)
+            role_contract = self.w3.eth.contract(address=r.address, abi=abi)
+            self._role_contracts[r.name] = role_contract
 
     def close(self) -> None:
         self._stop_anvil()
@@ -429,6 +479,17 @@ class Simulator:
         args, tx_value = self._build_call_with_abi(action, fn_name, abi)
         return target, abi, fn_name, args, tx_value
 
+    def _build_call_for_role(self, role: Role, action: Action):
+        """Like _build_call but checks the role's own deployed contract first
+        (if it has code_path) before falling back to main/token contracts."""
+        if role.code_path and role.name in self._role_contracts and "." not in action.function:
+            role_c = self._role_contracts[role.name]
+            for entry in role_c.abi:
+                if entry.get("type") == "function" and entry["name"] == action.function:
+                    args, tv = self._build_call_with_abi(action, action.function, role_c.abi)
+                    return role_c, role_c.abi, action.function, args, tv
+        return self._build_call(action)
+
     # ------------------------------------------------------------------ pseudo-actions
     def _is_pseudo(self, action_name: str) -> bool:
         return action_name in self.PSEUDO_ACTIONS
@@ -466,7 +527,7 @@ class Simulator:
                 line = self._dispatch_pseudo(action)
                 log.append(f"[env] {line}")
                 return
-            target, abi, fn_name, args, tx_value = self._build_call(action)
+            target, abi, fn_name, args, tx_value = self._build_call_for_role(role, action)
             tx_hash = target.functions[fn_name](*args).transact(
                 {"from": role.address, "value": tx_value}
             )
