@@ -1,0 +1,56 @@
+contract: targets/tier_a_canonical/SolmateERC4626.sol
+contract_name: SolmateERC4626
+deploy_value_wei: 0
+deploy_args:
+  - "@@USDC"
+
+# Same attack scenario. Expected: NO finding because Solmate's
+# require(shares != 0) reverts the victim's deposit when the attacker has
+# inflated the share price.
+
+tokens:
+  - name: USDC
+    decimals: 6
+    initial_balances:
+      Victim:   100_000_000
+      Attacker: 1_000_000_000_000
+
+roles:
+  - name: Victim
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: USDC
+    default_phase: 2
+    callable_functions: [deposit, redeem]
+  - name: Attacker
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: USDC
+    default_phase: 0
+    callable_functions: [deposit, redeem, "USDC.transfer"]
+
+honest_strategies:
+  Victim:
+    actions:
+      - { function: deposit, args: { assets: 100_000_000 } }
+      - { function: redeem,  args: { shares: 1 }, phase: 4 }
+  Attacker:
+    actions: []
+
+mutator_hints:
+  Victim:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: false
+    try_numeric_mutation: false
+  Attacker:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: false
+    try_numeric_mutation: false
+    compound_beam_max_depth: 3
+    compound_beam_width: 30
+    max_candidates_per_role: 3000
+
+value_pool_extras:
+  - 1
+
+expected_findings: []

@@ -1,0 +1,58 @@
+contract: targets/tier_a_canonical/OZERC4626.sol
+contract_name: OZERC4626
+deploy_value_wei: 0
+deploy_args:
+  - "@@USDC"
+
+# Same attack scenario as donation_vault_xc.yaml — Attacker tries the
+# canonical first-depositor inflation via raw USDC.transfer to the vault.
+# Expected: NO finding because OZ's decimals-offset adds 10^6 virtual
+# shares, making the math hostile to the attacker.
+
+tokens:
+  - name: USDC
+    decimals: 6
+    initial_balances:
+      Victim:   100_000_000             # 100 USDC
+      Attacker: 1_000_000_000_000       # 1,000,000 USDC
+
+roles:
+  - name: Victim
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: USDC
+    default_phase: 2
+    callable_functions: [deposit, redeem]
+  - name: Attacker
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: USDC
+    default_phase: 0
+    callable_functions: [deposit, redeem, "USDC.transfer"]
+
+honest_strategies:
+  Victim:
+    actions:
+      - { function: deposit, args: { assets: 100_000_000 } }
+      - { function: redeem,  args: { shares: 1 }, phase: 4 }   # try to redeem after attack window
+  Attacker:
+    actions: []
+
+mutator_hints:
+  Victim:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: false
+    try_numeric_mutation: false
+  Attacker:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: false
+    try_numeric_mutation: false
+    compound_beam_max_depth: 3
+    compound_beam_width: 30
+    max_candidates_per_role: 3000
+
+value_pool_extras:
+  - 1
+  - 100_000_000_000_000_000_000_000   # 100k USDC equivalent for cross-checks
+
+expected_findings: []

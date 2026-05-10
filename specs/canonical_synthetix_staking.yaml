@@ -1,0 +1,50 @@
+contract: targets/tier_a_canonical/SynthetixStakingRewards.sol
+contract_name: SynthetixStakingRewards
+deploy_value_wei: 0
+deploy_args:
+  - "@@STAKE"
+  - "@@REWARD"
+  - 1_000_000_000_000     # rewardRate ~ 1e12 reward-units per second
+
+# Same shape as yield_farm.yaml. Expected: NO finding — Synthetix's
+# updateReward modifier snapshots accrued rewards before changing balance,
+# so the deposit-flash-claim trick cannot inflate rewards.
+
+tokens:
+  - name: STAKE
+    decimals: 18
+    initial_balances:
+      User: 1_000_000_000_000_000_000_000   # 1000 STAKE
+  - name: REWARD
+    decimals: 18
+    initial_balances:
+      __admin__: 1_000_000_000_000_000_000_000_000   # 1M REWARD funded into the contract
+
+setup_calls:
+  - { function: REWARD.transfer, args: { to: "@@self", amount: 1_000_000_000_000_000_000_000_000 } }
+
+roles:
+  - name: User
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: REWARD
+    callable_functions: [stake, withdraw, getReward]
+
+honest_strategies:
+  User:
+    actions:
+      - { function: stake, args: { amount: 1_000_000_000_000_000_000 } }    # 1 STAKE
+      - { function: advance_time, args: { seconds: 86400 } }
+      - { function: getReward }
+      - { function: withdraw, args: { amount: 1_000_000_000_000_000_000 } }
+
+mutator_hints:
+  User:
+    try_self_targeting: false
+    try_skip_actions: true
+    try_action_insertion: true
+    try_numeric_mutation: false
+    compound_beam_max_depth: 3
+    compound_beam_width: 20
+    max_candidates_per_role: 2000
+
+expected_findings: []
