@@ -46,3 +46,24 @@ def test_safemoon_finds_unauthorized_burn():
         "SafeMoon unauthorized-burn drain not found.\n"
         + "\n".join(f.summary() for f in findings)
     )
+
+
+@pytest.mark.timeout(300)
+def test_beanstalk_finds_majority_governance_drain():
+    """Beanstalk Farms (Apr 2022): no-snapshot governance lets transient majority drain treasury.
+
+    Verified via 3-action compound mutation: deposit -> proposeAndExecute -> withdraw.
+    """
+    report = Campaign("specs/beanstalk_gov.yaml").run()
+    findings = report.profitable_deviations()
+    assert any(
+        _matches_expected(
+            f, "Attacker",
+            ["deposit", "proposeAndExecute", "withdraw"],
+            100_000_000_000_000_000_000,  # 100 TRSY
+        )
+        for f in findings
+    ), (
+        "Beanstalk-style governance drain not found.\n"
+        + "\n".join(f.summary() for f in findings)
+    )

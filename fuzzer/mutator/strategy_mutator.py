@@ -197,6 +197,23 @@ def generate_deviations(
                         new_strat.actions.append(Action(function=fn2, args=dict(args2), phase=p2))
                         _add(new_strat)
 
+    # 6. Compound template insertion (N-action cartesian product over arg variants).
+    if hints.compound_template:
+        from itertools import product as _product
+        slots = hints.compound_template
+        slot_meta: list[tuple[str, int, list[dict]]] = []
+        for slot in slots:
+            fn_name = slot["fn"]
+            phase = int(slot["phase"])
+            variants = _build_default_args_variants(fn_name, role, abi, value_pool, spec.roles)
+            slot_meta.append((fn_name, phase, variants))
+        var_lists = [m[2] for m in slot_meta]
+        for k, combo in enumerate(_product(*var_lists)):
+            new_strat = honest.clone(new_name=f"compound_template_{role.name}_#{k}")
+            for (fn_name, phase, _), args in zip(slot_meta, combo):
+                new_strat.actions.append(Action(function=fn_name, args=dict(args), phase=phase))
+            _add(new_strat)
+
     # 4. Numeric mutation of existing args (multipliers).
     if hints.try_numeric_mutation:
         multipliers = (("0.5x", 0.5), ("0.9x", 0.9), ("1.1x", 1.1), ("1.5x", 1.5), ("2x", 2.0))
