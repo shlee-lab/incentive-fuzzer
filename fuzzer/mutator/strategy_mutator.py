@@ -56,6 +56,8 @@ def _collect_value_pool(spec: Spec, role: Role) -> list[int]:
         for v in tdef.initial_balances.values():
             if isinstance(v, int) and not isinstance(v, bool):
                 pool.add(v)
+    for v in spec.value_pool_extras:
+        pool.add(int(v))
     pool.add(role.initial_eth)
     return sorted(pool)
 
@@ -90,6 +92,8 @@ def _build_default_args_variants(
             numeric_keys.append(key)
         elif inp["type"] == "bool":
             base[inp["name"]] = False
+        elif inp["type"] == "bytes" or inp["type"].startswith("bytes"):
+            base[inp["name"]] = ""
         else:
             base[inp["name"]] = 0
     if fn.get("stateMutability") == "payable":

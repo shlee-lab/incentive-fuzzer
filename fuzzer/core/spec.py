@@ -46,6 +46,7 @@ class Spec:
     tokens: list[TokenDef] = field(default_factory=list)
     setup_calls: list["Action"] = field(default_factory=list)
     expected_findings: list[ExpectedFinding] = field(default_factory=list)
+    value_pool_extras: list[int] = field(default_factory=list)
 
     def role_by_name(self, name: str) -> Role:
         for r in self.roles:
@@ -146,6 +147,8 @@ def load_spec(path: str | Path, role_addresses: dict[str, str]) -> Spec:
     for c in raw.get("setup_calls", []) or []:
         setup_calls.append(Action(function=c["function"], args=c.get("args", {}) or {}))
 
+    value_pool_extras = [_coerce_int(v) for v in (raw.get("value_pool_extras") or [])]
+
     return Spec(
         contract_path=contract_path,
         contract_name=contract_name,
@@ -157,4 +160,5 @@ def load_spec(path: str | Path, role_addresses: dict[str, str]) -> Spec:
         tokens=tokens,
         setup_calls=setup_calls,
         expected_findings=expected,
+        value_pool_extras=value_pool_extras,
     )

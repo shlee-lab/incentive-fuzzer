@@ -1,0 +1,34 @@
+"""Tier 3 reproduction tests: real-world incident contracts (vendored).
+
+Each test runs a Campaign on a faithfully reproduced bug from a documented
+exploit and asserts that the fuzzer auto-discovers the attacker's path.
+"""
+from __future__ import annotations
+
+import pytest
+
+from fuzzer.reporter.report import Finding
+from fuzzer.runner.campaign import Campaign
+
+
+def _matches_expected(f: Finding, role: str, must_contain: list[str], min_diff: int) -> bool:
+    if f.role != role:
+        return False
+    if f.payoff_diff_wei < min_diff:
+        return False
+    fns = {a.function for a in f.deviation.actions}
+    return all(needle in fns for needle in must_contain)
+
+
+@pytest.mark.timeout(180)
+def test_uranium_finds_k_invariant_drain():
+    """Uranium Finance v2.1 (Apr 2021): K-check uses 1000**2 instead of 10000**2."""
+    report = Campaign("specs/uranium_pair.yaml").run()
+    findings = report.profitable_deviations()
+    assert any(
+        _matches_expected(f, "Attacker", ["swap"], 100_000_000_000_000_000_000)  # 100 TKA
+        for f in findings
+    ), (
+        "Uranium K-invariant drain not found.\n"
+        + "\n".join(f.summary() for f in findings)
+    )

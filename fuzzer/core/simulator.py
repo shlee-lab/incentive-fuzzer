@@ -293,6 +293,14 @@ class Simulator:
             return self._resolve_int_arg(value)
         if sol_type == "bool":
             return bool(value)
+        if sol_type == "bytes" or sol_type.startswith("bytes"):
+            if isinstance(value, bytes):
+                return value
+            if isinstance(value, str):
+                if value.startswith("0x"):
+                    return bytes.fromhex(value[2:])
+                return value.encode()
+            return b""
         return value
 
     def _resolve_target(self, function: str) -> tuple[Contract, list[dict], str]:
