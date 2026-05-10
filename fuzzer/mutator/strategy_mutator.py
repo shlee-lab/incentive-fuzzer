@@ -76,16 +76,18 @@ def _replace_address_args_with_self(action: Action, role: Role, abi: list[dict])
 
 
 def _build_default_args_variants(
-    fn_name: str, role: Role, abi: list[dict], value_pool: list[int]
+    fn_name: str, role: Role, abi: list[dict], value_pool: list[int], all_roles: list[Role] | None = None
 ) -> list[dict[str, Any]]:
     fn = _find_fn_abi(abi, fn_name)
     if fn is None:
         return []
     base: dict[str, Any] = {}
     numeric_keys: list[str] = []
+    address_keys: list[str] = []
     for inp in fn.get("inputs", []):
         if inp["type"] == "address":
             base[inp["name"]] = f"@{role.name}"
+            address_keys.append(inp["name"])
         elif inp["type"].startswith("uint") or inp["type"].startswith("int"):
             key = f"{inp['name']}_wei"
             base[key] = 0
@@ -106,6 +108,18 @@ def _build_default_args_variants(
             variant = dict(base)
             variant[nk] = val
             variants.append(variant)
+    # Expand each variant to also try each OTHER role's address for each address key.
+    if address_keys and all_roles:
+        other_targets = [f"@{r.name}" for r in all_roles if r.name != role.name]
+        if other_targets:
+            extra = []
+            for v in variants:
+                for ak in address_keys:
+                    for tgt in other_targets:
+                        nv = dict(v)
+                        nv[ak] = tgt
+                        extra.append(nv)
+            variants.extend(extra)
     seen: set[str] = set()
     deduped: list[dict[str, Any]] = []
     for v in variants:
@@ -159,7 +173,7 @@ def generate_deviations(
     # 3. Action insertion (for each callable fn, each position, each default-arg variant).
     if hints.try_action_insertion:
         for fn_name in role.callable_functions:
-            variants = _build_default_args_variants(fn_name, role, abi, value_pool)
+            variants = _build_default_args_variants(fn_name, role, abi, value_pool, spec.roles)
             for pos in range(len(honest.actions) + 1):
                 for k, args in enumerate(variants):
                     new_strat = honest.clone(new_name=f"insert_{fn_name}@{pos}#v{k}")
@@ -171,9 +185,9 @@ def generate_deviations(
         p1 = hints.compound_phase_first
         p2 = hints.compound_phase_second
         for fn1 in role.callable_functions:
-            variants1 = _build_default_args_variants(fn1, role, abi, value_pool)
+            variants1 = _build_default_args_variants(fn1, role, abi, value_pool, spec.roles)
             for fn2 in role.callable_functions:
-                variants2 = _build_default_args_variants(fn2, role, abi, value_pool)
+                variants2 = _build_default_args_variants(fn2, role, abi, value_pool, spec.roles)
                 for i, args1 in enumerate(variants1):
                     for j, args2 in enumerate(variants2):
                         new_strat = honest.clone(

@@ -32,3 +32,17 @@ def test_uranium_finds_k_invariant_drain():
         "Uranium K-invariant drain not found.\n"
         + "\n".join(f.summary() for f in findings)
     )
+
+
+@pytest.mark.timeout(180)
+def test_safemoon_finds_unauthorized_burn():
+    """SafeMoon V2 (Mar 2023): public burn(address,uint) lets attacker burn victim's shares."""
+    report = Campaign("specs/safemoon_vault.yaml").run()
+    findings = report.profitable_deviations()
+    assert any(
+        _matches_expected(f, "Attacker", ["burn"], 10_000_000_000)  # 10,000 USDC
+        for f in findings
+    ), (
+        "SafeMoon unauthorized-burn drain not found.\n"
+        + "\n".join(f.summary() for f in findings)
+    )
