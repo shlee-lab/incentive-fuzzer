@@ -46,3 +46,17 @@ def test_yield_farm_finds_deposit_flash_claim():
         "Deposit-flash-claim deviation not found.\n"
         + "\n".join(f.summary() for f in findings)
     )
+
+
+@pytest.mark.timeout(180)
+def test_rebate_pool_finds_mev_rebate_capture():
+    """B: Phase-based interleaving. MEV's claim runs AFTER victim's swap."""
+    report = Campaign("specs/rebate_pool.yaml").run()
+    findings = report.profitable_deviations()
+    assert any(
+        _matches_expected(f, "MEV", ["claimRebate"], 100_000_000_000_000_000)  # 0.1 TKA
+        for f in findings
+    ), (
+        "MEV rebate-capture deviation not found.\n"
+        + "\n".join(f.summary() for f in findings)
+    )

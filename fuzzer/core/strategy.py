@@ -8,9 +8,10 @@ from .role import Role
 class Action:
     function: str
     args: dict[str, Any] = field(default_factory=dict)
+    phase: int | None = None  # None means "use role.default_phase"
 
     def clone(self) -> "Action":
-        return Action(function=self.function, args=dict(self.args))
+        return Action(function=self.function, args=dict(self.args), phase=self.phase)
 
 
 @dataclass

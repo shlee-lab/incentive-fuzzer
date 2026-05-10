@@ -7,14 +7,24 @@ class Role:
     address: str
     initial_eth: int
     callable_functions: tuple[str, ...]
-    primary_asset: str = "ETH"  # asset used for honest-vs-deviation comparison
+    primary_asset: str = "ETH"
+    default_phase: int = -1  # -1 means "use role index"; explicit values enable interleaving
 
     @classmethod
-    def make(cls, name: str, address: str, initial_eth: int, callable_functions, primary_asset: str = "ETH"):
+    def make(
+        cls,
+        name: str,
+        address: str,
+        initial_eth: int,
+        callable_functions,
+        primary_asset: str = "ETH",
+        default_phase: int = -1,
+    ):
         return cls(
             name=name,
             address=address,
             initial_eth=int(initial_eth),
             callable_functions=tuple(callable_functions),
             primary_asset=primary_asset,
+            default_phase=int(default_phase),
         )

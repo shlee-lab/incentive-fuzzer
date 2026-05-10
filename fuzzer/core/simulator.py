@@ -400,12 +400,20 @@ class Simulator:
         reverts: list[str] = []
         initial = self._snapshot_balances()
         try:
-            for role in self.spec.roles:
+            # Gather all (role, action) pairs and sort by (effective_phase, role_index, action_index).
+            # Effective phase: action.phase if set, else role.default_phase if >= 0, else role index.
+            schedule: list[tuple[int, int, int, Role, Action]] = []
+            for role_idx, role in enumerate(self.spec.roles):
                 strat = strategies.get(role.name)
                 if strat is None:
                     continue
-                for action in strat.actions:
-                    self._exec_action(role, action, log, reverts)
+                role_default = role.default_phase if role.default_phase >= 0 else role_idx
+                for action_idx, action in enumerate(strat.actions):
+                    phase = action.phase if action.phase is not None else role_default
+                    schedule.append((phase, role_idx, action_idx, role, action))
+            schedule.sort(key=lambda t: (t[0], t[1], t[2]))
+            for _, _, _, role, action in schedule:
+                self._exec_action(role, action, log, reverts)
             final = self._snapshot_balances()
             deltas = {
                 r: {a: final[r][a] - initial[r][a] for a in final[r]}

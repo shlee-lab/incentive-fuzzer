@@ -84,6 +84,7 @@ def load_spec(path: str | Path, role_addresses: dict[str, str]) -> Spec:
                 initial_eth=_coerce_int(r["initial_eth_wei"]),
                 callable_functions=r["callable_functions"],
                 primary_asset=r.get("primary_asset", "ETH"),
+                default_phase=int(r.get("default_phase", -1)),
             )
         )
     role_lookup = {r.name: r for r in roles}
@@ -93,7 +94,11 @@ def load_spec(path: str | Path, role_addresses: dict[str, str]) -> Spec:
         if role_name not in role_lookup:
             raise KeyError(f"honest_strategies references unknown role {role_name}")
         actions = [
-            Action(function=a["function"], args=a.get("args", {}) or {})
+            Action(
+                function=a["function"],
+                args=a.get("args", {}) or {},
+                phase=(int(a["phase"]) if "phase" in a else None),
+            )
             for a in body["actions"]
         ]
         honest[role_name] = Strategy(role=role_lookup[role_name], name="honest", actions=actions)
