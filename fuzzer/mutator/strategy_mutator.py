@@ -17,14 +17,16 @@ from ..core.strategy import Action, Strategy
 
 _FLOW_KEYWORDS = {
     "inflow":  ("deposit", "mint", "supply", "stake", "add", "provide", "bond",
-                "buy", "lock", "seed", "fund", "join"),
+                "buy", "lock", "seed", "fund", "join", "open"),
     "outflow": ("withdraw", "redeem", "burn", "unstake", "remove", "claim",
-                "sell", "unlock", "release", "exit", "harvest"),
+                "sell", "unlock", "release", "exit", "harvest",
+                "borrow", "loan", "drawdown", "redeempt", "close"),
     "swap":    ("swap", "exchange", "trade", "convert"),
     "manip":   ("set", "update", "bump", "distribute", "addyield", "donate",
-                "report", "poke", "rebase", "skim", "sync", "accrue"),
+                "report", "poke", "rebase", "skim", "sync", "accrue",
+                "transfer", "approve"),
     "action":  ("liquidate", "slash", "execute", "propose", "vote",
-                "emergencycommit"),
+                "emergencycommit", "commit"),
 }
 
 
@@ -62,6 +64,11 @@ def auto_compound_templates(
     manips  = [f for f in callable_functions if _classify_fn(f) == "manip"]
     actions = [f for f in callable_functions if _classify_fn(f) == "action"]
 
+    # The final slot of every archetype lands at PHASE_LAST so it executes
+    # AFTER honest actions of other roles (which typically live at phases 0..N).
+    # Setup-style slots (inflow / swap that pumps) go at the low end. Spec
+    # authors with a specific phase plan can override via manual compound_template.
+    PHASE_LAST = 100
     templates: list[list[dict]] = []
     # A. inflow -> manip -> outflow
     for i in inflow:
@@ -70,7 +77,7 @@ def auto_compound_templates(
                 templates.append([
                     {"fn": i, "phase": 0},
                     {"fn": m, "phase": 1},
-                    {"fn": o, "phase": 2},
+                    {"fn": o, "phase": PHASE_LAST},
                 ])
     # B. inflow -> swap -> outflow (oracle/AMM imbalance)
     for i in inflow:
@@ -79,7 +86,7 @@ def auto_compound_templates(
                 templates.append([
                     {"fn": i, "phase": 0},
                     {"fn": s, "phase": 1},
-                    {"fn": o, "phase": 2},
+                    {"fn": o, "phase": PHASE_LAST},
                 ])
     # C. swap round-trip
     for s1 in swaps:
@@ -88,7 +95,7 @@ def auto_compound_templates(
                 continue
             templates.append([
                 {"fn": s1, "phase": 0},
-                {"fn": s2, "phase": 1},
+                {"fn": s2, "phase": PHASE_LAST},
             ])
     # D. inflow -> action -> outflow
     for i in inflow:
@@ -97,7 +104,7 @@ def auto_compound_templates(
                 templates.append([
                     {"fn": i, "phase": 0},
                     {"fn": a, "phase": 1},
-                    {"fn": o, "phase": 2},
+                    {"fn": o, "phase": PHASE_LAST},
                 ])
     # E. multi-claim chain
     if outflow:
@@ -105,8 +112,32 @@ def auto_compound_templates(
             templates.append([
                 {"fn": o, "phase": 0},
                 {"fn": o, "phase": 1},
-                {"fn": o, "phase": 2},
+                {"fn": o, "phase": PHASE_LAST},
             ])
+    # F. 4-step: inflow -> swap (pump) -> outflow (claim) -> swap (cash out).
+    for i in inflow:
+        for s1 in swaps:
+            for o in outflow:
+                for s2 in swaps:
+                    if s1 == s2:
+                        continue
+                    templates.append([
+                        {"fn": i,  "phase": 0},
+                        {"fn": s1, "phase": 1},
+                        {"fn": o,  "phase": 2},
+                        {"fn": s2, "phase": PHASE_LAST},
+                    ])
+    # G. 4-step: inflow -> manip -> swap -> outflow.
+    for i in inflow:
+        for m in manips:
+            for s in swaps:
+                for o in outflow:
+                    templates.append([
+                        {"fn": i, "phase": 0},
+                        {"fn": m, "phase": 1},
+                        {"fn": s, "phase": 2},
+                        {"fn": o, "phase": PHASE_LAST},
+                    ])
     return templates
 
 
