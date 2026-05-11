@@ -1,0 +1,76 @@
+contract: targets/tier_g_oneday/IronFinanceRun.sol
+contract_name: IronFinanceRun
+deploy_value_wei: 0
+deploy_args:
+- '@@IRON'
+- '@@USDC'
+- '@@TITAN'
+tokens:
+- name: IRON
+  decimals: 18
+  initial_balances:
+    Alice: 50000000000000000000000
+    Bob: 50000000000000000000000
+- name: USDC
+  decimals: 18
+  initial_balances:
+    __admin__: 2000000000000000000000000
+- name: TITAN
+  decimals: 18
+  initial_balances:
+    __admin__: 1000000000000000000000000
+setup_calls:
+- function: USDC.transfer
+  args:
+    to: '@@self'
+    amount: 1000000000000000000000000
+- function: seedAMM
+  args:
+    amtT: 100000000000000000000000
+    amtU: 100000000000000000000000
+- function: mintIRON
+  args:
+    to: '@Alice'
+    amt: 50000000000000000000000
+- function: mintIRON
+  args:
+    to: '@Bob'
+    amt: 50000000000000000000000
+roles:
+- name: Alice
+  initial_eth_wei: 1000000000000000000000
+  primary_asset: USDC
+  default_phase: 0
+  callable_functions:
+  - redeem
+  agent_type: best_response
+- name: Bob
+  initial_eth_wei: 1000000000000000000000
+  primary_asset: USDC
+  default_phase: 1
+  callable_functions:
+  - redeem
+  agent_type: best_response
+honest_strategies:
+  Alice:
+    actions: []
+  Bob:
+    actions: []
+mutator_hints:
+  Alice:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: true
+    try_numeric_mutation: false
+    auto_compound_templates: true
+    max_candidates_per_role: 3000
+  Bob:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: true
+    try_numeric_mutation: false
+    auto_compound_templates: true
+    max_candidates_per_role: 3000
+value_pool_extras:
+- 50000000000000000000000
+expected_findings: []

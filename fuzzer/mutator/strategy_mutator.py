@@ -24,23 +24,46 @@ _FLOW_KEYWORDS = {
     "swap":    ("swap", "exchange", "trade", "convert"),
     "manip":   ("set", "update", "bump", "distribute", "addyield", "donate",
                 "report", "poke", "rebase", "skim", "sync", "accrue",
-                "transfer", "approve"),
+                "transfer", "approve", "harvest", "advance"),
     "action":  ("liquidate", "slash", "execute", "propose", "vote",
                 "emergencycommit", "commit"),
 }
 
 
 def _classify_fn(fn_name: str) -> str:
-    """Return one of 'inflow', 'outflow', 'swap', 'manip', 'action', 'other'."""
+    """Return one of 'inflow', 'outflow', 'swap', 'manip', 'action', 'other'.
+
+    Backward-compat single-category return (first match wins). Prefer
+    _classify_fn_multi for archetype generation — many DeFi functions
+    legitimately span multiple categories (e.g. `harvest` mutates an index
+    AND distributes a reward).
+    """
     base = fn_name.split(".")[-1].lower()
-    # Special-case full-name match to avoid e.g. "depositFor" matching "deposit"
-    # over "for" — we check substring containment which is greedy but works for
-    # common DeFi naming conventions.
     for kind, keys in _FLOW_KEYWORDS.items():
         for k in keys:
             if k in base:
                 return kind
     return "other"
+
+
+def _classify_fn_multi(fn_name: str) -> set[str]:
+    """Return the SET of categories the function name matches.
+
+    Some functions legitimately belong to multiple roles in an attack:
+      - `harvest`: index-bump (manip) AND reward-distribute (outflow)
+      - `liquidate`: state action AND value-transfer (outflow when self-liq)
+      - `report`: state-change (manip) AND can cascade share-price (outflow)
+    Multi-category classification lets the same function fill different
+    archetype slots without forcing the spec author to duplicate it.
+    """
+    base = fn_name.split(".")[-1].lower()
+    cats: set[str] = set()
+    for kind, keys in _FLOW_KEYWORDS.items():
+        for k in keys:
+            if k in base:
+                cats.add(kind)
+                break
+    return cats if cats else {"other"}
 
 
 def auto_compound_templates(
@@ -58,11 +81,18 @@ def auto_compound_templates(
     Returns a list of templates, each a list of {fn, phase} slots. Caller
     supplies values/args at the slot level or relies on the global value pool.
     """
-    inflow  = [f for f in callable_functions if _classify_fn(f) == "inflow"]
-    outflow = [f for f in callable_functions if _classify_fn(f) == "outflow"]
-    swaps   = [f for f in callable_functions if _classify_fn(f) == "swap"]
-    manips  = [f for f in callable_functions if _classify_fn(f) == "manip"]
-    actions = [f for f in callable_functions if _classify_fn(f) == "action"]
+    inflow  = [f for f in callable_functions if "inflow"  in _classify_fn_multi(f)]
+    outflow = [f for f in callable_functions if "outflow" in _classify_fn_multi(f)]
+    swaps   = [f for f in callable_functions if "swap"    in _classify_fn_multi(f)]
+    manips  = [f for f in callable_functions if "manip"   in _classify_fn_multi(f)]
+    actions = [f for f in callable_functions if "action"  in _classify_fn_multi(f)]
+
+    # Outflow fallback: when no explicit outflow function is in the role's
+    # callable set, treat swap / action functions as outflow proxies. This
+    # captures cases where the only value-extraction path is via a swap
+    # (bond-and-dump) or via an action like liquidate (dYdX self-liquidation
+    # collects insurance-fund reward, no separate close function exposed).
+    outflow_effective = outflow if outflow else (list(swaps) + list(actions))
 
     # The final slot of every archetype lands at PHASE_LAST so it executes
     # AFTER honest actions of other roles (which typically live at phases 0..N).
@@ -73,7 +103,7 @@ def auto_compound_templates(
     # A. inflow -> manip -> outflow
     for i in inflow:
         for m in manips:
-            for o in outflow:
+            for o in outflow_effective:
                 templates.append([
                     {"fn": i, "phase": 0},
                     {"fn": m, "phase": 1},
@@ -82,7 +112,9 @@ def auto_compound_templates(
     # B. inflow -> swap -> outflow (oracle/AMM imbalance)
     for i in inflow:
         for s in swaps:
-            for o in outflow:
+            for o in outflow_effective:
+                if o == s:
+                    continue
                 templates.append([
                     {"fn": i, "phase": 0},
                     {"fn": s, "phase": 1},
@@ -100,26 +132,37 @@ def auto_compound_templates(
     # D. inflow -> action -> outflow
     for i in inflow:
         for a in actions:
-            for o in outflow:
+            for o in outflow_effective:
                 templates.append([
                     {"fn": i, "phase": 0},
                     {"fn": a, "phase": 1},
                     {"fn": o, "phase": PHASE_LAST},
                 ])
     # E. multi-claim chain
-    if outflow:
-        for o in outflow:
+    if outflow_effective:
+        for o in outflow_effective:
             templates.append([
                 {"fn": o, "phase": 0},
                 {"fn": o, "phase": 1},
                 {"fn": o, "phase": PHASE_LAST},
             ])
+    # H. 2-step inflow -> outflow. Catches direct bond-and-dump,
+    # buy-and-sell on a bonding curve, deposit-and-immediate-withdraw
+    # patterns where no manip/swap intermediate step is needed.
+    for i in inflow:
+        for o in outflow_effective:
+            if i == o:
+                continue
+            templates.append([
+                {"fn": i, "phase": 0},
+                {"fn": o, "phase": PHASE_LAST},
+            ])
     # F. 4-step: inflow -> swap (pump) -> outflow (claim) -> swap (cash out).
     for i in inflow:
         for s1 in swaps:
-            for o in outflow:
+            for o in outflow_effective:
                 for s2 in swaps:
-                    if s1 == s2:
+                    if s1 == s2 or o == s2:
                         continue
                     templates.append([
                         {"fn": i,  "phase": 0},
@@ -131,7 +174,9 @@ def auto_compound_templates(
     for i in inflow:
         for m in manips:
             for s in swaps:
-                for o in outflow:
+                for o in outflow_effective:
+                    if o == s:
+                        continue
                     templates.append([
                         {"fn": i, "phase": 0},
                         {"fn": m, "phase": 1},

@@ -1,0 +1,43 @@
+contract: targets/tier_g_oneday/OlympusInverseBond.sol
+contract_name: OlympusInverseBond
+deploy_value_wei: 0
+deploy_args:
+- '@@PAYOUT'
+- '@@BOND'
+tokens:
+- name: PAYOUT
+  decimals: 18
+  initial_balances:
+    __admin__: 1000000000000000000000000
+- name: BOND
+  decimals: 18
+  initial_balances:
+    Attacker: 10000000000000000000000
+setup_calls:
+- function: fund
+  args:
+    amt: 1000000000000000000000000
+roles:
+- name: Attacker
+  initial_eth_wei: 1000000000000000000000
+  primary_asset: PAYOUT
+  callable_functions:
+  - bond
+  - claim
+  - advance_time
+honest_strategies:
+  Attacker:
+    actions: []
+mutator_hints:
+  Attacker:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: false
+    try_numeric_mutation: false
+    try_compound_pair_insertion: false
+    max_candidates_per_role: 3000
+    auto_compound_templates: true
+expected_findings:
+- role: Attacker
+  payoff_higher_than_honest: true
+  min_payoff_diff_wei: 20000000000000000000000
