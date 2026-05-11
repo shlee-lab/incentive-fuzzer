@@ -15,6 +15,11 @@ class Role:
     code_path: str | None = None
     code_name: str | None = None
     code_ctor_args: tuple = ()
+    # For multi-agent iterated-best-response equilibrium analysis:
+    #   "honest"        — sticks to spec's honest_strategies entry
+    #   "best_response" — searches for best deviation against current
+    #                     equilibrium strategies of other agents
+    agent_type: str = "honest"
 
     @classmethod
     def make(
@@ -28,6 +33,7 @@ class Role:
         code_path: str | None = None,
         code_name: str | None = None,
         code_ctor_args=(),
+        agent_type: str = "honest",
     ):
         return cls(
             name=name,
@@ -39,4 +45,5 @@ class Role:
             code_path=code_path,
             code_name=code_name,
             code_ctor_args=tuple(code_ctor_args),
+            agent_type=agent_type,
         )

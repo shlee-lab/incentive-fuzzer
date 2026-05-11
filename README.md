@@ -32,20 +32,64 @@ correctly, but rational actors break the protocol's economic intent" class.
 
 ## Status
 
-| Spec                          | Incentive assumption violated      | Found by fuzzer  | Diff      |
-|-------------------------------|------------------------------------|------------------|-----------|
-| `specs/simple_lending.yaml`   | Borrower ≠ Liquidator              | self-liquidate   | +40 ETH   |
-| `specs/simple_auction.yaml`   | Seller ≠ Bidder                    | shill-bid self   | +98 ETH   |
-| `specs/simple_staking.yaml`   | Validator ≠ Delegator              | self-delegate    | +99 ETH   |
-| `specs/referral_vault.yaml`   | User ≠ Referrer                    | self-refer       | +5 USDC   |
-| `specs/yield_farm.yaml`       | Stake-time is finite per deposit   | flash deposit    | +86 REWARD|
-| `specs/rebate_pool.yaml`      | Fee rebate goes to LPs             | MEV claim        | +0.3 TKA  |
-| `specs/sandwich_pool.yaml`    | No pre-tx information privilege    | sandwich         | +85 TKA   |
-| `specs/beanstalk_gov.yaml`    | Voting weight is durable           | governance drain | +1000 TRSY|
+### Bug-class detection on synthetic / reduction targets
 
-FP-control (Tier A / B / C): canonical safe versions of each pattern
-produce zero findings on production code, and 38 real mainnet contracts
-across Ethereum / Arbitrum / Base / Optimism all produce zero findings.
+| Spec                                         | Incentive assumption violated      | Found by fuzzer       | Diff           |
+|----------------------------------------------|------------------------------------|-----------------------|----------------|
+| `specs/simple_lending.yaml`                  | Borrower ≠ Liquidator              | self-liquidate        | +40 ETH        |
+| `specs/simple_auction.yaml`                  | Seller ≠ Bidder                    | shill-bid self        | +98 ETH        |
+| `specs/simple_staking.yaml`                  | Validator ≠ Delegator              | self-delegate         | +99 ETH        |
+| `specs/referral_vault.yaml`                  | User ≠ Referrer                    | self-refer            | +5 USDC        |
+| `specs/yield_farm.yaml`                      | Stake-time is finite per deposit   | flash deposit         | +86 REWARD     |
+| `specs/rebate_pool.yaml`                     | Fee rebate goes to LPs             | MEV claim             | +0.3 TKA       |
+| `specs/sandwich_pool.yaml`                   | No pre-tx information privilege    | sandwich              | +85 TKA        |
+| `specs/beanstalk_gov.yaml`                   | Voting weight is durable           | governance drain      | drains TRSY    |
+| `specs/oracle_lending.yaml`                  | Spot price is non-manipulable      | deposit → pump → borrow | +30,000 STBL |
+| `specs/multiagent_shared_treasury.yaml`      | All agents passive                 | iterated best-response converges to first-mover claim | +100 ETH |
+
+`beanstalk_gov.yaml` is a reduction of the April 2022 Beanstalk Farms
+attack (~$182M). `oracle_lending.yaml` is a reduction of the Mango Markets
+(~$117M) / Cream Finance (~$130M) / Inverse Finance (~$15M) class.
+`multiagent_shared_treasury.yaml` exercises **iterated best response** —
+each agent re-optimizes against the others' current strategy until a fixed
+point is reached.
+
+### Honest result on mainnet code
+
+We attached the fuzzer to **57 production mainnet contracts** across
+Ethereum / Arbitrum / Base / Optimism (Uniswap V2, Sushi, Velo, Camelot,
+Aerodrome pairs; Curve 3pool / tricrypto / crvUSD / steth-eth metapools;
+ERC4626 vaults including wstETH, sfrxETH, sUSDe, sFRAX, Yearn v3,
+Etherfi weETH, MetaMorpho, Spark sUSDS, Renzo, KelpDAO; WETH9; the real
+Beanstalk Diamond `0xC1E0…624C5` at block 14602789 pre-attack; Lido stETH;
+sDAI). ~1,400 candidates evaluated total. **TPs found: 0.**
+
+This is a deliberate, documented limitation. Generic mutators cannot
+autonomously synthesize protocol-specific multi-step payloads
+(`diamondCut` BIP bytes, Curve metapool manipulation through specific
+imbalance ratios, flash-loan provider routing, etc.). Real-world
+incentive zero-day discovery requires either compound-template hints
+that already encode the attack shape, or protocol-specific payload
+encoders. We position this tool as a **design-time guardrail for new
+protocols**, not a mainnet zero-day finder.
+
+### Echidna baseline comparison
+
+On the same `BeanstalkGov` reduction:
+
+| | Incentive fuzzer | Echidna |
+|---|---|---|
+| Budget | 650 candidates, depth ≤ 3 | 100,113 calls, seqLen 50, 4 workers |
+| Wall time | ~5 s | ~75 s |
+| Properties | utility(deviation) > utility(honest) | 4 state invariants (conservation, balance, bound) |
+| Findings | **4 TP_protocol_drain** | **0** (all invariants pass) |
+
+The bug is not a state-predicate violation. After the attack
+`totalStake == sum(stake[*])` still holds; `voteToken.balanceOf(gov)`
+matches; treasury balance is ≤ initial. Echidna cannot express
+"attacker's utility delta vs the honest strategy" as a pure-state
+predicate. See `comparison/echidna/RESULTS.md` for details and
+reproduction.
 
 ## Setup
 
@@ -190,8 +234,12 @@ targets/
   tier3_reproductions/  BeanstalkGov (governance-vote durability)
   tier_a_canonical/     OZ-ERC4626 / Solmate-ERC4626 / SynthetixStakingRewards / SushiMasterChef
   tier_b_canonical/     UniswapV2Pair / CompoundCErc20 / OZGovernor / LidoLite
-  tier_c_mainnet/       WETH9 / Curve3Pool / IERC4626 / Lido (ABI ports for fork attach)
+  tier_c_mainnet/       WETH9 / Curve3Pool / IERC4626 / Lido / BeanstalkDiamond (ABI ports for fork attach)
+  tier_e_multiagent/    SharedTreasury (iterated best-response equilibrium)
+  tier_f_oracle/        OracleLending (spot-price oracle manipulation)
 specs/                  matching .yaml per target
+comparison/
+  echidna/              Side-by-side baseline: same code, different fuzzer mode (see RESULTS.md)
 tests/
   test_tier1_findings.py     incentive bugs in toy protocols
   test_tier2_findings.py     incentive bugs in realistic mocks
@@ -200,7 +248,31 @@ tests/
   test_tier_b_canonical.py   FP-control on higher-stakes safe versions
   test_tier_c_mainnet.py     FP-control on real mainnet, plus fork positive control
 scripts/
-  mainnet_sweep.py     multi-chain breadth sweep over 38+ addresses
+  mainnet_sweep.py     multi-chain breadth sweep over 50+ addresses
 docs/
   live-protocol-candidates.md  prioritized list of candidate test targets
 ```
+
+## Citing / paper positioning
+
+The contribution this codebase backs is:
+
+1. **A new bug-class formalization**: incentive-design vulnerabilities as
+   *utility-delta over multi-step deviations*, distinct from
+   state-invariant violations.
+2. **An automatic search procedure** (compound depth-N beam search with
+   coverage novelty + multi-asset utility) that reliably surfaces
+   instances of this class on reductions of real exploits (Beanstalk,
+   Mango/Cream-class oracle manipulation, role-separation).
+3. **Multi-agent extension** (`agent_type: best_response`) that detects
+   equilibrium divergence from the protocol designer's assumed strategy
+   profile — orthogonal to single-agent fuzzing.
+4. **An honest empirical limit**: on production mainnet contracts, the
+   generic mutator does not autonomously synthesize the protocol-specific
+   payloads required for known attack classes. We document this rather
+   than hide it.
+
+The right comparison is **not** "did you find more zero-days than tool X"
+but "what class of bug can you *express* and *detect*". The Echidna
+baseline (`comparison/echidna/`) demonstrates the class boundary
+concretely on a shared target.

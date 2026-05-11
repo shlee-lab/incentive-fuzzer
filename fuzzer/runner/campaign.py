@@ -236,7 +236,108 @@ class Campaign:
                         sim, role, honest_primary.get(role.name, 0), eps, report, budget=remaining
                     )
 
+            # If any roles are marked best_response, run iterated-best-response
+            # equilibrium analysis on top of single-role search.
+            br_roles = [r for r in sim.spec.roles if r.agent_type == "best_response"]
+            if len(br_roles) >= 2:
+                self._run_iterated_best_response(sim, br_roles, honest_primary, report)
+
             return report
+
+    def _run_iterated_best_response(
+        self,
+        sim: Simulator,
+        br_roles: list[Role],
+        honest_primary: dict[str, int],
+        report: CampaignReport,
+    ) -> None:
+        """Each best_response role searches for its best deviation HOLDING
+        OTHER ROLES' current strategies fixed. Iterate to convergence (or
+        max_iter). If the equilibrium strategy profile differs from the
+        all-honest profile, the protocol has a multi-agent incentive bug
+        (e.g., free-rider / coordination failure / race condition).
+
+        This is the novel contribution beyond Echidna-style single-property
+        fuzzing: existing tools find STATE invariant violations; we find
+        MULTI-AGENT EQUILIBRIUM mismatches.
+        """
+        from ..core.strategy import Strategy
+        from ..reporter.report import Finding, classify_finding, coverage_signature
+
+        self._log(f"\n=== IteratedBestResponse over {[r.name for r in br_roles]} ===")
+        strategies = dict(sim.spec.honest_strategies)
+        max_iter = 5
+        eps_by_role = {
+            r.name: (self.epsilon_wei if self.epsilon_wei is not None else _default_epsilon(r))
+            for r in br_roles
+        }
+
+        for iteration in range(max_iter):
+            self._log(f"--- iteration {iteration} ---")
+            converged = True
+            for role in br_roles:
+                # Generate role's candidate deviations against CURRENT strategies of others.
+                token_abis = self._token_abis(sim)
+                abi = self._role_extended_abi(sim, role)
+                candidates = generate_deviations(sim.spec, role.name, abi, token_abis)
+                budget = sim.spec.mutator_hints[role.name].max_candidates_per_role or len(candidates)
+                candidates = candidates[:budget]
+
+                # Baseline: this role's payoff under current strategy profile.
+                baseline_scenario = dict(strategies)
+                baseline_result = sim.execute_scenario(baseline_scenario)
+                baseline_payoff = baseline_result.primary_for(role)
+
+                best_payoff = baseline_payoff
+                best_strat = strategies[role.name]
+                best_result = baseline_result
+                for cand in candidates:
+                    scenario = dict(strategies)
+                    scenario[role.name] = cand
+                    result = sim.execute_scenario(scenario)
+                    report.candidates_evaluated += 1
+                    payoff = result.primary_for(role)
+                    if payoff > best_payoff + eps_by_role[role.name]:
+                        best_payoff = payoff
+                        best_strat = cand
+                        best_result = result
+
+                if best_strat is not strategies[role.name]:
+                    self._log(
+                        f"  [{role.name}] best response found: "
+                        f"payoff {baseline_payoff/1e18:+.4f} -> {best_payoff/1e18:+.4f} "
+                        f"({best_strat.name})"
+                    )
+                    strategies[role.name] = best_strat
+                    converged = False
+                    # Record as a finding.
+                    finding = Finding(
+                        role=role.name,
+                        primary_asset=role.primary_asset,
+                        deviation=best_strat,
+                        honest_payoff=honest_primary.get(role.name, 0),
+                        deviation_payoff=best_payoff,
+                        asset_deltas=dict(best_result.asset_deltas.get(role.name, {})),
+                        action_log=best_result.action_log,
+                        reverts=best_result.reverts,
+                    )
+                    finding.label, finding.label_reason = classify_finding(
+                        finding, sim.spec, report.honest_asset_deltas, best_result.asset_deltas
+                    )
+                    finding.coverage = coverage_signature(best_result.action_log)
+                    # Use a distinct deviation.name to mark it as equilibrium-found.
+                    finding.deviation = Strategy(
+                        role=best_strat.role,
+                        name=f"BR_iter{iteration}/{best_strat.name}",
+                        actions=list(best_strat.actions),
+                    )
+                    report.findings.append(finding)
+
+            if converged:
+                self._log(f"  converged after {iteration + 1} iterations")
+                break
+        else:
+            self._log(f"  did not converge in {max_iter} iterations")
 
 
 def main(argv: list[str] | None = None) -> int:

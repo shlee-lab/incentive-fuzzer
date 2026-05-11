@@ -1,0 +1,50 @@
+contract: targets/tier_c_mainnet/BeanstalkDiamond.sol
+contract_name: BeanstalkDiamond
+contract_address: "0xC1E088fC1323b20BCBee9bd1B9fC9546db5624C5"
+fork:
+  url: "${ALCHEMY_ETH_RPC}"
+  block: 14602789       # immediately before the April 17, 2022 attack
+
+# Attaches the real Beanstalk Diamond at the block right before the
+# governance attack. The Diamond pattern routes our calls to the
+# correct facet implementations as they existed at that block — so
+# the contract code, state, and bug are all the historical ones.
+#
+# Caveats:
+# - Voting weight in the real attack came from depositing flash-borrowed
+#   BEAN3CRV LP into the silo. Modeling that here would require the
+#   Curve BEAN3CRV pool address, Aave flash-loan provider, etc. We do
+#   NOT model that; the attacker role just deposits whatever they have.
+# - The malicious BIP encoded a diamondCut to add a treasury-drain
+#   facet. Constructing that bytes-blob is protocol-specific and not
+#   autonomously synthesizable by the fuzzer.
+#
+# What this spec demonstrates:
+# - Framework attaches to real production Diamond at the exact historical
+#   block of a $182M exploit.
+# - Mutator/sim can route calls through Diamond fallback to facets.
+# - Without the protocol-specific malicious-BIP payload, the fuzzer
+#   reports zero TPs — proving multi-protocol composability attacks need
+#   either compound_template hints or specialized BIP encoders. This is
+#   a CONCRETE LIMITATION result for the paper.
+
+roles:
+  - name: Attacker
+    initial_eth_wei: 100_000_000_000_000_000_000
+    primary_asset: ETH
+    callable_functions: [deposit, withdraw, propose, vote, emergencyCommit, commit]
+
+honest_strategies:
+  Attacker:
+    actions: []
+
+mutator_hints:
+  Attacker:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: true
+    try_numeric_mutation: false
+    try_compound_pair_insertion: true
+    max_candidates_per_role: 100
+
+expected_findings: []

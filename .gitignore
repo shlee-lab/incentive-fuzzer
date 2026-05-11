@@ -9,3 +9,4 @@ cache/
 broadcast/
 .env
 .env.local
+comparison/echidna/crytic-export/

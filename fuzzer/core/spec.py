@@ -130,6 +130,7 @@ def load_spec(path: str | Path, role_addresses: dict[str, str]) -> Spec:
                 code_path=r.get("code_path"),
                 code_name=r.get("code_name"),
                 code_ctor_args=tuple(r.get("code_ctor_args", []) or []),
+                agent_type=r.get("agent_type", "honest"),
             )
         )
     role_lookup = {r.name: r for r in roles}
