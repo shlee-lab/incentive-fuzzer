@@ -1,0 +1,47 @@
+contract: targets/tier_g_oneday/NFTMintRace.sol
+contract_name: NFTMintRace
+deploy_value_wei: 0
+deploy_args:
+  - "@@P"
+
+tokens:
+  - name: P
+    decimals: 18
+    initial_balances:
+      __admin__: 1_000_000_000_000_000_000_000_000      # 1M P for floor bank
+      Attacker:   100_000_000_000_000_000_000           # 100 P (enough to mint many)
+
+setup_calls:
+  - { function: fundFloor, args: { amt: 1_000_000_000_000_000_000_000_000 } }
+
+roles:
+  - name: Attacker
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: P
+    callable_functions: [mint, sellAtFloor]
+
+honest_strategies:
+  Attacker:
+    actions: []
+
+mutator_hints:
+  Attacker:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: false
+    try_numeric_mutation: false
+    try_compound_pair_insertion: false
+    max_candidates_per_role: 200
+    compound_template:
+      - fn: mint
+        phase: 0
+        values: [5]                                # cap is 5 per block
+      - fn: sellAtFloor
+        phase: 1
+        values: [5]
+
+expected_findings:
+  - role: Attacker
+    deviation_must_contain: [mint, sellAtFloor]
+    payoff_higher_than_honest: true
+    min_payoff_diff_wei: 40_000_000_000_000_000_000   # +40 P (5 mints × 9 P markup)

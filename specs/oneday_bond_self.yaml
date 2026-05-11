@@ -1,0 +1,52 @@
+contract: targets/tier_g_oneday/BondSelfDeal.sol
+contract_name: BondSelfDeal
+deploy_value_wei: 0
+deploy_args:
+  - "@@P"
+  - "@@S"
+
+tokens:
+  - name: P
+    decimals: 18
+    initial_balances:
+      __admin__: 1_000_000_000_000_000_000_000_000     # 1M P seed (AMM + bond stock)
+  - name: S
+    decimals: 18
+    initial_balances:
+      __admin__: 1_000_000_000_000_000_000_000_000     # 1M S seed
+      Attacker:  10_000_000_000_000_000_000_000        # 10k S bond capital
+
+setup_calls:
+  - { function: seedAMM, args: { amtP: 1_000_000_000_000_000_000_000_000, amtS: 1_000_000_000_000_000_000_000_000 } }
+
+roles:
+  - name: Attacker
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: S
+    callable_functions: [bond, swapPForS]
+
+honest_strategies:
+  Attacker:
+    actions: []
+
+mutator_hints:
+  Attacker:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: false
+    try_numeric_mutation: false
+    try_compound_pair_insertion: false
+    max_candidates_per_role: 200
+    compound_template:
+      - fn: bond
+        phase: 0
+        values: [10_000_000_000_000_000_000_000]      # bond all 10k S
+      - fn: swapPForS
+        phase: 1
+        values: [11_000_000_000_000_000_000_000]      # sell 11k P (we got 11k from 10% bonus)
+
+expected_findings:
+  - role: Attacker
+    deviation_must_contain: [bond, swapPForS]
+    payoff_higher_than_honest: true
+    min_payoff_diff_wei: 500_000_000_000_000_000_000   # +500 S (gross from 10% bonus minus slippage)
