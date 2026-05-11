@@ -154,6 +154,10 @@ class Simulator:
             cmd += ["--fork-url", self.spec.fork.url]
             if self.spec.fork.block is not None:
                 cmd += ["--fork-block-number", str(self.spec.fork.block)]
+                # Our vendored Solidity 0.8.24 contracts emit PUSH0 (Shanghai+).
+                # Force the EVM hardfork to Shanghai so we can deploy them on
+                # top of historical pre-Shanghai forks (block < 17034870).
+                cmd += ["--hardfork", "shanghai"]
         self._anvil = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,

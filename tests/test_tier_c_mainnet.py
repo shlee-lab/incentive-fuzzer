@@ -75,6 +75,27 @@ def test_mainnet_sdai_no_tp():
 
 
 @pytest.mark.timeout(600)
+def test_historical_beanstalk_at_pre_attack_block():
+    """Deploys our BeanstalkGov reproduction atop a mainnet fork pinned to
+    block 14602789 — immediately before the real Beanstalk Farms governance
+    drain on April 17, 2022 ($182M lost). At that exact historical moment
+    the production economic state had this incentive vulnerability, and our
+    framework auto-discovers the same `deposit -> proposeAndExecute` attack
+    sequence.
+
+    Tests that fork mode + archive-block access + EVM hardfork override
+    (Shanghai forced so our PUSH0-emitting bytecode runs on pre-Shanghai
+    state) all work end-to-end.
+    """
+    report = _run_or_skip("specs/historical_beanstalk_pre_attack.yaml")
+    tps = report.true_positives()
+    assert tps, "Beanstalk pattern not found at historical pre-attack block."
+    assert max(f.payoff_diff_wei for f in tps) > 100 * 10**18, (
+        "Historical drain magnitude below 100 TRSY threshold."
+    )
+
+
+@pytest.mark.timeout(600)
 def test_positive_control_beanstalk_on_fork():
     """POSITIVE CONTROL: incentive-design bug discovered through fork-mode.
 
