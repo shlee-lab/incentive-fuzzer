@@ -1,0 +1,54 @@
+contract: targets/tier_g_oneday/GmxOpenPrice.sol
+contract_name: GmxOpenPrice
+deploy_value_wei: 0
+deploy_args:
+  - "@@C"
+
+tokens:
+  - name: C
+    decimals: 18
+    initial_balances:
+      __admin__: 100_000_000_000_000_000_000_000     # 100,000 C
+      Attacker:   10_000_000_000_000_000_000_000     # 10,000 C margin
+
+# Admin pre-funds the perp contract so closeLong can pay out PnL.
+setup_calls:
+  - { function: C.transfer, args: { to: "@@self", amount: 100_000_000_000_000_000_000_000 } }
+
+roles:
+  - name: Attacker
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: C
+    callable_functions: [pokePrice, openLong, closeLong]
+
+honest_strategies:
+  Attacker:
+    actions: []
+
+mutator_hints:
+  Attacker:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: false
+    try_numeric_mutation: false
+    try_compound_pair_insertion: false
+    max_candidates_per_role: 1500
+    compound_template:
+      - fn: pokePrice
+        phase: 0
+        values: [100_000_000_000_000_000_000]    # 100 (1/10 of fair)
+      - fn: openLong
+        phase: 1
+        values: [10_000_000_000_000_000_000_000, 1_000_000_000_000_000_000_000]   # size, margin
+      - fn: pokePrice
+        phase: 2
+        values: [10_000_000_000_000_000_000_000]  # 10,000 (10x fair)
+      - fn: closeLong
+        phase: 3
+        values: [10_000_000_000_000_000_000_000]
+
+expected_findings:
+  - role: Attacker
+    deviation_must_contain: [pokePrice, openLong, pokePrice, closeLong]
+    payoff_higher_than_honest: true
+    min_payoff_diff_wei: 1_000_000_000_000_000_000

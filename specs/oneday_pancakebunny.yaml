@@ -1,0 +1,61 @@
+contract: targets/tier_g_oneday/PancakeBunnyMint.sol
+contract_name: PancakeBunnyMint
+deploy_value_wei: 0
+deploy_args:
+  - "@@LP"
+  - "@@QUOTE"
+
+# PancakeBunny 2021-05 (~$45M). Reward = staked_lp * (reserveQuote / reserveBunny).
+# Pumping reserveQuote vs reserveBunny inflates the reward without bound.
+tokens:
+  - name: LP
+    decimals: 18
+    initial_balances:
+      Attacker: 1_000_000_000_000_000_000           # 1 LP token to stake
+  - name: QUOTE
+    decimals: 18
+    initial_balances:
+      __admin__: 100_000_000_000_000_000_000_000    # 100,000 QUOTE for seed
+      Attacker:  50_000_000_000_000_000_000_000     # 50,000 QUOTE pump capital
+
+setup_calls:
+  - { function: seed, args: { amtBunny: 100_000_000_000_000_000_000, amtQuote: 100_000_000_000_000_000_000_000 } }
+
+roles:
+  - name: Attacker
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: QUOTE
+    callable_functions: [stake, unstake, claim, swapQuoteForBunny, swapBunnyForQuote]
+
+honest_strategies:
+  Attacker:
+    actions: []
+
+mutator_hints:
+  Attacker:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: false
+    try_numeric_mutation: false
+    try_compound_pair_insertion: false
+    # stake → pump (reduce bunny reserve, inflate quote reserve) → claim → swap bunny for quote
+    compound_template:
+      - { fn: stake,              phase: 0 }
+      - { fn: swapQuoteForBunny,  phase: 1 }
+      - { fn: claim,              phase: 2 }
+      - { fn: swapBunnyForQuote,  phase: 3 }
+
+value_pool_extras:
+  - 1_000_000_000_000_000_000              # 1 LP stake
+  - 40_000_000_000_000_000_000_000         # 40,000 QUOTE pump
+  - 30_000_000_000_000_000_000_000         # 30,000 QUOTE pump
+  - 50_000_000_000_000_000_000_000         # 50,000 QUOTE pump (max attacker capital)
+  - 100_000_000_000_000_000_000            # 100 BUNNY swap
+  - 1_000_000_000_000_000_000_000          # 1000 BUNNY swap
+  - 10_000_000_000_000_000_000_000         # 10000 BUNNY swap
+
+expected_findings:
+  - role: Attacker
+    deviation_must_contain: [stake, swapQuoteForBunny, claim, swapBunnyForQuote]
+    payoff_higher_than_honest: true
+    min_payoff_diff_wei: 1_000_000_000_000_000_000_000

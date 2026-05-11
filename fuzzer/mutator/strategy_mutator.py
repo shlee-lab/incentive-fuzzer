@@ -130,6 +130,31 @@ def _build_default_args_variants(
             variant = dict(base)
             variant[nk] = val
             variants.append(variant)
+    # Multi-numeric-arg combos: functions like mintLP(amtA, amtB), seedPool(...),
+    # openMarginPosition(...) need ALL numeric args set simultaneously, not just
+    # one at a time. We emit (a) "all-args-same-value" variants for each pool
+    # value, and (b) up to 64 bounded cartesian-product variants so paired
+    # asymmetric ratios (e.g., 1 WETH vs 1000 USDC for an LP) are also reached.
+    if len(numeric_keys) > 1:
+        # (a) uniform same-value across all numeric keys
+        for val in value_pool:
+            variant = dict(base)
+            for nk in numeric_keys:
+                variant[nk] = val
+            variants.append(variant)
+        # (b) bounded cartesian product — caps explosion on N-arg signatures.
+        from itertools import product as _prod
+        pool_sample = list(value_pool)
+        max_combos = 64
+        emitted = 0
+        for combo in _prod(pool_sample, repeat=len(numeric_keys)):
+            if emitted >= max_combos:
+                break
+            variant = dict(base)
+            for nk, v in zip(numeric_keys, combo):
+                variant[nk] = v
+            variants.append(variant)
+            emitted += 1
     # Address variants: try each OTHER role and "@@self" (the main contract).
     if address_keys:
         targets: list[str] = []
@@ -244,9 +269,20 @@ def generate_deviations(
         for slot in slots:
             fn_name = slot["fn"]
             phase = int(slot["phase"])
-            variants = _build_default_args_variants(
-                fn_name, role, abi, value_pool, spec.roles, token_abis
-            )
+            # Slot can either:
+            #  - pin a literal args dict (single concrete invocation per slot),
+            #    used for pseudo-actions like advance_time and for replaying
+            #    well-known exploits with hand-picked params, or
+            #  - override the value pool with a tight list (avoids blowup over
+            #    the global pool while keeping cartesian search across slots).
+            if "args" in slot:
+                variants = [dict(slot["args"])]
+            else:
+                slot_pool = slot.get("values")
+                used_pool = [int(v) for v in slot_pool] if slot_pool is not None else value_pool
+                variants = _build_default_args_variants(
+                    fn_name, role, abi, used_pool, spec.roles, token_abis
+                )
             slot_meta.append((fn_name, phase, variants))
         var_lists = [m[2] for m in slot_meta]
         for k, combo in enumerate(_product(*var_lists)):

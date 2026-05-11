@@ -1,0 +1,66 @@
+contract: targets/tier_g_oneday/CreamYVaultOracle.sol
+contract_name: CreamYVaultOracle
+deploy_value_wei: 0
+deploy_args:
+  - "@@DAI"
+  - "@@USDC"
+
+# Cream Finance 2021-10 (~$130M). Attack:
+#   1) deposit small DAI into yVault, get shares
+#   2) depositCollateral the shares into the lending side
+#   3) donate huge DAI directly to vault via DAI.transfer(vault, X)
+#   4) pricePerShare() now massively inflated
+#   5) borrow USDC against the inflated share value
+tokens:
+  - name: DAI
+    decimals: 18
+    initial_balances:
+      __admin__: 1_000_000_000_000_000_000_000   # 1000 DAI — initial vault seed
+      Attacker: 10_000_000_000_000_000_000_000   # 10,000 DAI pump capital
+  - name: USDC
+    decimals: 18
+    initial_balances:
+      __admin__: 1_000_000_000_000_000_000_000_000   # 1,000,000 USDC for lending
+
+setup_calls:
+  - { function: DAI.transfer, args: { to: "@@self", amount: 1_000_000_000_000_000_000_000 } }   # seed vault
+  - { function: fund, args: { amt: 1_000_000_000_000_000_000_000_000 } }                         # lending liquidity
+
+roles:
+  - name: Attacker
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: USDC
+    callable_functions: [deposit, withdraw, depositCollateral, withdrawCollateral, borrow, "DAI.transfer"]
+
+honest_strategies:
+  Attacker:
+    actions: []
+
+mutator_hints:
+  Attacker:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: false
+    try_numeric_mutation: false
+    try_compound_pair_insertion: false
+    max_candidates_per_role: 3000
+    # The attack shape: deposit small → collateralize → DONATE → borrow.
+    compound_template:
+      - { fn: deposit,            phase: 0 }
+      - { fn: depositCollateral,  phase: 1 }
+      - { fn: "DAI.transfer",     phase: 2 }    # donate to inflate pricePerShare
+      - { fn: borrow,             phase: 3 }
+
+value_pool_extras:
+  - 1_000_000_000_000_000_000             # 1 DAI deposit
+  - 100_000_000_000_000_000_000           # 100 DAI deposit
+  - 9_000_000_000_000_000_000_000         # 9,000 DAI donation
+  - 5_000_000_000_000_000_000_000         # 5,000 DAI donation
+  - 100_000_000_000_000_000_000_000       # 100,000 USDC borrow
+  - 500_000_000_000_000_000_000_000       # 500,000 USDC borrow
+
+expected_findings:
+  - role: Attacker
+    deviation_must_contain: [deposit, depositCollateral, "DAI.transfer", borrow]
+    payoff_higher_than_honest: true
+    min_payoff_diff_wei: 1_000_000_000_000_000_000_000   # net +1000 USDC after donating 10k DAI
