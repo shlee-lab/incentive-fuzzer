@@ -194,16 +194,25 @@ class Campaign:
                         report.findings.append(finding)
                         self._log(f"  + beam d{d} {finding.summary()}")
 
+                    deltas = result.asset_deltas.get(role.name, {})
                     if profit > 0:
-                        score = 1e30 + float(profit)  # always above any state-change score
+                        score = 1e30 + float(profit)
                     else:
-                        state_change = sum(
-                            abs(v) for v in result.asset_deltas.get(role.name, {}).values()
+                        # Utility-gradient signal: prioritize stems where the
+                        # attacker GAINED *something* (even a non-primary asset
+                        # that might be convertible later), and where they did
+                        # NOT lose the primary. Novel coverage stays as the
+                        # top-priority exploration bonus.
+                        state_change = sum(abs(v) for v in deltas.values())
+                        positive_total = sum(v for v in deltas.values() if v > 0)
+                        primary_loss = max(0, -deltas.get(role.primary_asset, 0))
+                        score = (
+                            1e25 * novelty                           # explore new functions
+                            + 1e22 * (1 if positive_total > 0 else 0) # attacker gained something
+                            + float(positive_total) * 1e-3            # magnitude of gain
+                            - float(primary_loss) * 1e-3              # penalty for losing primary
+                            + float(state_change) * 1e-6              # tie-break on activity
                         )
-                        # Coverage-guided bonus: prefer stems exercising new fns vs honest.
-                        # 1e20 per novel function dwarfs any plausible state_change in raw
-                        # token units but stays below the profit-found threshold.
-                        score = float(state_change) + 1e20 * novelty
                     scored.append((score, extended))
 
             scored.sort(key=lambda x: x[0], reverse=True)

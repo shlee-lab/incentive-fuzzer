@@ -20,6 +20,12 @@ class MutatorHints:
     # compound_template: list of {fn: str, phase: int}; mutator generates the
     # cartesian product of arg variants across these slots in order.
     compound_template: list[dict] | None = None
+    # When true, the mutator auto-generates compound_templates from common
+    # attack archetypes (inflow→manip→outflow, inflow→swap→outflow,
+    # swap round-trip, inflow→action→outflow, multi-claim chain), classifying
+    # the role's callable_functions by name heuristic. Use as a discovery
+    # mode when you don't yet know the attack shape.
+    auto_compound_templates: bool = False
     # Autonomous depth-N: campaign runs a beam search, extending top-K stems
     # by every single-action insertion at each depth. >=2 enables it.
     compound_beam_max_depth: int = 0
@@ -160,6 +166,7 @@ def load_spec(path: str | Path, role_addresses: dict[str, str]) -> Spec:
             compound_phase_first=(int(body["compound_phase_first"]) if "compound_phase_first" in body else None),
             compound_phase_second=(int(body["compound_phase_second"]) if "compound_phase_second" in body else None),
             compound_template=(list(body["compound_template"]) if "compound_template" in body else None),
+            auto_compound_templates=bool(body.get("auto_compound_templates", False)),
             compound_beam_max_depth=int(body.get("compound_beam_max_depth", 0)),
             compound_beam_width=int(body.get("compound_beam_width", 10)),
             max_candidates_per_role=int(body.get("max_candidates_per_role", 0)),

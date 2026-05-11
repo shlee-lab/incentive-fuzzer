@@ -7,6 +7,109 @@ from ..core.spec import MutatorHints, Spec
 from ..core.strategy import Action, Strategy
 
 
+# ---------------------------------------------------------------------------
+# Function-flow classifier — name-based heuristic
+# ---------------------------------------------------------------------------
+# Classifies ABI function names by likely asset-flow direction. Used by the
+# auto-compound-template generator to seed attack archetypes when the spec
+# author hasn't hand-written a `compound_template`. Heuristic only — flag
+# the function if any token of its name matches one of the keyword sets.
+
+_FLOW_KEYWORDS = {
+    "inflow":  ("deposit", "mint", "supply", "stake", "add", "provide", "bond",
+                "buy", "lock", "seed", "fund", "join"),
+    "outflow": ("withdraw", "redeem", "burn", "unstake", "remove", "claim",
+                "sell", "unlock", "release", "exit", "harvest"),
+    "swap":    ("swap", "exchange", "trade", "convert"),
+    "manip":   ("set", "update", "bump", "distribute", "addyield", "donate",
+                "report", "poke", "rebase", "skim", "sync", "accrue"),
+    "action":  ("liquidate", "slash", "execute", "propose", "vote",
+                "emergencycommit"),
+}
+
+
+def _classify_fn(fn_name: str) -> str:
+    """Return one of 'inflow', 'outflow', 'swap', 'manip', 'action', 'other'."""
+    base = fn_name.split(".")[-1].lower()
+    # Special-case full-name match to avoid e.g. "depositFor" matching "deposit"
+    # over "for" — we check substring containment which is greedy but works for
+    # common DeFi naming conventions.
+    for kind, keys in _FLOW_KEYWORDS.items():
+        for k in keys:
+            if k in base:
+                return kind
+    return "other"
+
+
+def auto_compound_templates(
+    callable_functions: list[str],
+) -> list[list[dict]]:
+    """Generate archetype-based compound templates from a function list.
+
+    Archetypes covered:
+      A. inflow -> manip -> outflow      (yield front-run, share-inflation)
+      B. inflow -> swap -> outflow       (oracle spot manipulation)
+      C. swap   -> swap                  (round-trip / sandwich)
+      D. inflow -> action -> outflow     (governance/liquidation route)
+      E. action -> action -> outflow     (multi-claim / chained claim)
+
+    Returns a list of templates, each a list of {fn, phase} slots. Caller
+    supplies values/args at the slot level or relies on the global value pool.
+    """
+    inflow  = [f for f in callable_functions if _classify_fn(f) == "inflow"]
+    outflow = [f for f in callable_functions if _classify_fn(f) == "outflow"]
+    swaps   = [f for f in callable_functions if _classify_fn(f) == "swap"]
+    manips  = [f for f in callable_functions if _classify_fn(f) == "manip"]
+    actions = [f for f in callable_functions if _classify_fn(f) == "action"]
+
+    templates: list[list[dict]] = []
+    # A. inflow -> manip -> outflow
+    for i in inflow:
+        for m in manips:
+            for o in outflow:
+                templates.append([
+                    {"fn": i, "phase": 0},
+                    {"fn": m, "phase": 1},
+                    {"fn": o, "phase": 2},
+                ])
+    # B. inflow -> swap -> outflow (oracle/AMM imbalance)
+    for i in inflow:
+        for s in swaps:
+            for o in outflow:
+                templates.append([
+                    {"fn": i, "phase": 0},
+                    {"fn": s, "phase": 1},
+                    {"fn": o, "phase": 2},
+                ])
+    # C. swap round-trip
+    for s1 in swaps:
+        for s2 in swaps:
+            if s1 == s2:
+                continue
+            templates.append([
+                {"fn": s1, "phase": 0},
+                {"fn": s2, "phase": 1},
+            ])
+    # D. inflow -> action -> outflow
+    for i in inflow:
+        for a in actions:
+            for o in outflow:
+                templates.append([
+                    {"fn": i, "phase": 0},
+                    {"fn": a, "phase": 1},
+                    {"fn": o, "phase": 2},
+                ])
+    # E. multi-claim chain
+    if outflow:
+        for o in outflow:
+            templates.append([
+                {"fn": o, "phase": 0},
+                {"fn": o, "phase": 1},
+                {"fn": o, "phase": 2},
+            ])
+    return templates
+
+
 def _find_fn_abi(
     abi: list[dict],
     name: str,
@@ -262,9 +365,17 @@ def generate_deviations(
                             _add(new_strat)
 
     # 6. Compound template insertion (N-action cartesian product over arg variants).
+    # If auto_compound_templates is on and no manual template is provided,
+    # generate archetype-based templates from role.callable_functions.
+    templates_to_run: list[list[dict]] = []
     if hints.compound_template:
+        templates_to_run.append(hints.compound_template)
+    if hints.auto_compound_templates and not hints.compound_template:
+        templates_to_run.extend(auto_compound_templates(role.callable_functions))
+
+    for template in templates_to_run:
         from itertools import product as _product
-        slots = hints.compound_template
+        slots = template
         slot_meta: list[tuple[str, int, list[dict]]] = []
         for slot in slots:
             fn_name = slot["fn"]
