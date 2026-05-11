@@ -163,6 +163,26 @@ TARGETS = [
     # ============== Optimism ==============
     ("v2", "OP:Velo_WETH_USDC",    "0x79c912FEF520be002c2B6e57EC4324e260f38E50", "OP"),
     ("v2", "OP:Velo_OP_WETH",      "0x0493Bf8b6DBB159Ce2Db2E0E8403E753Abd1235b", "OP"),
+
+    # ============ NEWER / LESS-AUDITED targets (Tier C-2 expansion) =============
+    # Newer ERC4626 vaults — most are 2024 deployments, smaller TVL.
+    ("erc4626", "ETH:Spark_sUSDS",      "0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD", "ETH"),
+    ("erc4626", "ETH:Yearn_yvDAI_v3",   "0x028eC7330ff87667b6dfb0D94b954c820195336c", "ETH"),
+    ("erc4626", "ETH:Yearn_yvUSDC_v3",  "0xBe53A109B494E5c9f97b9Cd39Fe969BE68BF6204", "ETH"),
+    ("erc4626", "ETH:Sommelier_RYUSD",  "0x97e6E0a40a3D02F12d1cEC30ebfbAE04e37C119E", "ETH"),
+    ("erc4626", "ETH:MetaMorpho_Steakhouse_USDC", "0xBEEFFF209270748ddd194831b3fa287a5386f5bC", "ETH"),
+    # LRT / liquid restaking wrappers (use IERC4626 ABI; may not all conform)
+    ("erc4626", "ETH:KelpDAO_rsETH_wr", "0xA1290d69c65A6Fe4DF752f95823fae25cB99e5A7", "ETH"),
+    ("erc4626", "ETH:Renzo_xezETH",    "0xbf5495Efe5DB9ce00f80364C8B423567e58d2110", "ETH"),
+    ("erc4626", "ETH:Etherfi_weETH",   "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee", "ETH"),
+    # Newer / smaller Curve pools
+    ("curve", "ETH:Curve_crvUSD_USDC", "0x4DEcE678ceceb27446b35C672dC7d61F30bAD69E", "ETH"),
+    ("curve", "ETH:Curve_crvUSD_USDT", "0x390f3595bCa2Df7d23783dFd126427CCeb997BF4", "ETH"),
+    ("curve", "ETH:Curve_eth_frxeth",  "0xa1F8A6807c402E4A15ef4EBa36528A3FED24E577", "ETH"),
+    # L2 native AMMs (smaller / less-audited)
+    ("v2", "BASE:Aero_USDC_WETH_volatile", "0xcDAC0d6c6C59727a65F871236188350531885C43", "BASE"),
+    ("v2", "ARB:Camelot_GMX_WETH",         "0xa6c5C7D189fA4eB5Af8ba34E63dCDD3a635D433f", "ARB"),
+    ("v2", "OP:Velo_USDC_DAI",             "0x4F7eBc19844259386DBdDB7b2eB759eeFc6F8353", "OP"),
 ]
 
 
