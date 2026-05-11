@@ -1,0 +1,69 @@
+contract: targets/tier_g_oneday/LidoSelfDelegate.sol
+contract_name: LidoSelfDelegate
+deploy_value_wei: 0
+deploy_args:
+  - "@@STETH"
+  - "@Validator"
+
+tokens:
+  - name: STETH
+    decimals: 18
+    initial_balances:
+      __admin__:    1_000_000_000_000_000_000_000      # 1000 stETH for distribute
+      Validator:    5_000_000_000_000_000_000_000      # 5000 stETH (self-stake) — validator both delegates and validates
+      OtherStaker: 10_000_000_000_000_000_000_000      # 10,000 stETH normal staker
+
+# Bootstrap: admin pre-funds the contract, distributes a reward (which validator
+# earns 10% of), then slashes the validator (which routes the 10% back into the
+# slashing fund). At this point a self-staked validator can claim a pro-rata
+# slice of their own slashing penalty via claimSlashingShare.
+setup_calls:
+  - { function: distributeReward, args: { amt: 100_000_000_000_000_000_000 } }   # admin distribute 100 stETH; validator earns 10 stETH
+  - { function: slash, args: { amt: 10_000_000_000_000_000_000 } }                # admin slashes validator's 10 stETH; slashingFund += 10
+
+roles:
+  - name: Validator
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: STETH
+    callable_functions: [stake, unstake, distributeReward, claimValidatorReward, slash, claimSlashingShare]
+  - name: OtherStaker
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: STETH
+    callable_functions: [stake]
+
+honest_strategies:
+  Validator:
+    actions: []
+  OtherStaker:
+    actions:
+      - { function: stake, args: { amt: 10_000_000_000_000_000_000_000 }, phase: 0 }
+
+mutator_hints:
+  Validator:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: false
+    try_numeric_mutation: false
+    try_compound_pair_insertion: false
+    max_candidates_per_role: 500
+    compound_template:
+      - fn: stake
+        phase: 1
+        values: [5_000_000_000_000_000_000_000]      # validator self-stakes 5000 stETH
+      - fn: claimSlashingShare
+        phase: 2
+        args: {}
+      - fn: unstake
+        phase: 3
+        values: [5_000_000_000_000_000_000_000]
+  OtherStaker:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: false
+    try_numeric_mutation: false
+
+expected_findings:
+  - role: Validator
+    deviation_must_contain: [stake, distributeReward, slash, claimSlashingShare]
+    payoff_higher_than_honest: true
+    min_payoff_diff_wei: 1_000_000_000_000_000_000   # +1 stETH from self-slash refund

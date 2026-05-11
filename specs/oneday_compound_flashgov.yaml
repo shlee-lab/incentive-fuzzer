@@ -1,0 +1,58 @@
+contract: targets/tier_g_oneday/CompoundFlashGov.sol
+contract_name: CompoundFlashGov
+deploy_value_wei: 0
+deploy_args:
+  - "@@GOV"
+  - "@@REWARD"
+
+tokens:
+  - name: GOV
+    decimals: 18
+    initial_balances:
+      __admin__: 100_000_000_000_000_000_000           # 100 GOV (existing votes)
+      Attacker: 1_000_000_000_000_000_000_000          # 1000 GOV (capital, simulates flash loan)
+  - name: REWARD
+    decimals: 18
+    initial_balances:
+      __admin__: 1_000_000_000_000_000_000_000_000     # 1M REWARD
+
+setup_calls:
+  - { function: REWARD.transfer, args: { to: "@@self", amount: 1_000_000_000_000_000_000_000_000 } }
+  - { function: deposit, args: { amt: 100_000_000_000_000_000_000 } }   # admin deposits 100 GOV
+
+roles:
+  - name: Attacker
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: REWARD
+    callable_functions: [deposit, withdraw, proposeAndExecute]
+
+honest_strategies:
+  Attacker:
+    actions: []
+
+mutator_hints:
+  Attacker:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: false
+    try_numeric_mutation: false
+    try_compound_pair_insertion: false
+    max_candidates_per_role: 500
+    compound_template:
+      - fn: deposit
+        phase: 0
+        values: [1_000_000_000_000_000_000_000]                  # 1000 GOV (flash-borrow scale)
+      - fn: proposeAndExecute
+        phase: 1
+        args:
+          to: "@Attacker"
+          mintAmount: 1_000_000_000_000_000_000_000_000          # 1M REWARD
+      - fn: withdraw
+        phase: 2
+        values: [1_000_000_000_000_000_000_000]
+
+expected_findings:
+  - role: Attacker
+    deviation_must_contain: [deposit, proposeAndExecute]
+    payoff_higher_than_honest: true
+    min_payoff_diff_wei: 100_000_000_000_000_000_000_000   # +100,000 REWARD
