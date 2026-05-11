@@ -1,26 +1,51 @@
 # incentive-fuzzer
 
-A fuzzer that searches for **incentive invariants** in Solidity protocols: given
-a contract plus role/utility/honest-strategy specs, it auto-discovers rational
-deviations where some role profits beyond honest behavior. Distinct from
-state-invariant fuzzers (Echidna, Foundry) — state stays consistent; the bug is
-that the protocol's *implicit role-separation assumption* (e.g. "Borrower and
-Liquidator are different parties") isn't enforced in code.
+A fuzzer that searches for **incentive-design vulnerabilities** in
+Solidity protocols. Given a contract plus role/utility/honest-strategy
+specs, it auto-discovers rational deviations where some role profits
+beyond honest behavior because the protocol's *implicit economic
+assumption* — typically about role separation, time-snapshot durability,
+or external-context invariance — isn't enforced.
+
+## Scope (and what's out of scope)
+
+**In scope** — incentive-design flaws. The code works as written; an
+unstated economic assumption is violated by a rational actor:
+
+  - role-separation assumptions ("Borrower ≠ Liquidator", "Seller ≠ Bidder")
+  - voting-weight durability ("majority at execute time ≠ flash-borrowed")
+  - mempool/ordering privilege ("no trader has pre-execution information")
+  - reward-distribution-target assumptions ("rebate goes to LPs")
+  - referral / sourcing assumptions ("referrer ≠ depositor")
+
+**Out of scope** — code defects:
+
+  - reentrancy / CEI violations
+  - precision/overflow/integer math bugs
+  - access-control omissions
+  - typos in invariant constants
+  - storage-layout collisions
+
+Code defects belong to **Echidna / Foundry-fuzz / Slither / Mythril /
+Halmos**. We model only the orthogonal "everything compiles and runs
+correctly, but rational actors break the protocol's economic intent" class.
 
 ## Status
 
-Tier 1 only. Three trivial protocols, three deviations auto-found:
+| Spec                          | Incentive assumption violated      | Found by fuzzer  | Diff      |
+|-------------------------------|------------------------------------|------------------|-----------|
+| `specs/simple_lending.yaml`   | Borrower ≠ Liquidator              | self-liquidate   | +40 ETH   |
+| `specs/simple_auction.yaml`   | Seller ≠ Bidder                    | shill-bid self   | +98 ETH   |
+| `specs/simple_staking.yaml`   | Validator ≠ Delegator              | self-delegate    | +99 ETH   |
+| `specs/referral_vault.yaml`   | User ≠ Referrer                    | self-refer       | +5 USDC   |
+| `specs/yield_farm.yaml`       | Stake-time is finite per deposit   | flash deposit    | +86 REWARD|
+| `specs/rebate_pool.yaml`      | Fee rebate goes to LPs             | MEV claim        | +0.3 TKA  |
+| `specs/sandwich_pool.yaml`    | No pre-tx information privilege    | sandwich         | +85 TKA   |
+| `specs/beanstalk_gov.yaml`    | Voting weight is durable           | governance drain | +1000 TRSY|
 
-| Spec                          | Honest payoff (role)            | Deviation found             | Diff      |
-| ----------------------------- | ------------------------------- | --------------------------- | --------- |
-| `specs/simple_lending.yaml`   | Borrower: −40 ETH               | Borrower self-liquidates    | +40 ETH   |
-| `specs/simple_auction.yaml`   | Seller: +2 ETH                  | Seller shill-bids self      | +98 ETH   |
-| `specs/simple_staking.yaml`   | Validator: +900 ETH (90% pool)  | Validator self-delegates    | +99 ETH   |
-
-```
-$ pytest tests/test_tier1_findings.py
-====== 3 passed in 8.07s ======
-```
+FP-control (Tier A / B / C): canonical safe versions of each pattern
+produce zero findings on production code, and 38 real mainnet contracts
+across Ethereum / Arbitrum / Base / Optimism all produce zero findings.
 
 ## Setup
 
@@ -31,6 +56,9 @@ forge build
 ```
 
 Requires Foundry (`forge`, `anvil`) on PATH and Python 3.11+.
+
+For mainnet fork tests, set `ALCHEMY_ETH_RPC` (and optionally the Arb /
+Base / OP variants) in `.env.local` (gitignored).
 
 ## Run
 
@@ -43,47 +71,60 @@ A campaign on a single spec:
 The full validation suite:
 
 ```bash
-.venv/bin/python -m pytest tests/test_tier1_findings.py -v
+.venv/bin/python -m pytest tests/
 ```
 
-## Adding a new protocol
+Multi-chain mainnet sweep:
 
-Three pieces, in order:
+```bash
+source .env.local && .venv/bin/python scripts/mainnet_sweep.py
+```
 
-### 1. Solidity contract (`targets/.../YourContract.sol`)
-
-Write the protocol normally. Include a header comment naming:
-
-- the honest behavior of each role,
-- the implicit role-separation assumption you suspect is unenforced,
-- the deviation you expect the fuzzer to surface.
-
-The simulator funds the contract on deploy via `deploy_value_wei`; constructor
-args come from the spec's `deploy_args`.
-
-### 2. Spec (`specs/your_spec.yaml`)
+## Spec format
 
 ```yaml
 contract: targets/.../YourContract.sol
 contract_name: YourContract
 deploy_value_wei: <wei sent on deploy>
-deploy_args: [ ... constructor arg values; "@RoleName" resolves to that role's address ... ]
+deploy_args: [ ... "@RoleName" / "@@TokenName" address sentinels resolve at runtime ... ]
+
+tokens:                      # ERC20s deployed via MockERC20
+  - name: USDC
+    decimals: 6
+    initial_balances:
+      RoleA: 1000_000000
+
+setup_calls:                 # admin-initiated post-deployment setup
+  - { function: fundRewards, args: { amount: 100_000000 } }
+  - { function: USDC.transfer, args: { to: "@@self", amount: 1000_000000 } }
 
 roles:
   - name: RoleA
     initial_eth_wei: <wei>
-    callable_functions: [fn1, fn2]   # functions the mutator may insert/skip for this role
+    primary_asset: USDC      # asset used for honest-vs-deviation comparison
+    callable_functions: [fn1, fn2, "USDC.transfer"]   # cross-contract supported
+    default_phase: 1         # explicit phase for interleaving across roles
 
 honest_strategies:
   RoleA:
     actions:
-      - { function: fn1, args: { value_wei: ..., someArg_wei: ... } }
-      - { function: simulate_price_drop, args: { factor: 0.7 } }   # pseudo-action
-      - { function: wait }
-      - { function: distribute_rewards, args: { amount_wei: ... } } # pseudo-action
+      - { function: fn1, args: { value_wei: ..., arg_wei: ... }, phase: 1 }
+      - { function: simulate_price_drop, args: { factor: 0.7 } }    # pseudo-action
+      - { function: advance_time, args: { seconds: 86400 } }
 
 mutator_hints:
-  RoleA: { try_self_targeting: true, try_skip_actions: true, try_action_insertion: true }
+  RoleA:
+    try_self_targeting: true             # rewrite @Other addrs to @Self
+    try_skip_actions: true               # drop one honest action
+    try_action_insertion: true           # insert one callable
+    try_compound_pair_insertion: true    # insert two actions at distinct phases
+    compound_beam_max_depth: 3           # autonomous depth-N beam search
+    compound_beam_width: 15
+    max_candidates_per_role: 600         # hard budget cap
+
+fork:                                     # optional — attach to a real chain
+  url: "${ALCHEMY_ETH_RPC}"
+contract_address: "0x..."                # required when forking
 
 expected_findings:
   - role: RoleA
@@ -92,84 +133,74 @@ expected_findings:
     min_payoff_diff_wei: <wei threshold>
 ```
 
-Argument conventions:
+## How discovery works
 
-- `value_wei` on any action → `msg.value`. Anywhere else, the simulator strips
-  a trailing `_wei` if the literal key isn't an ABI parameter.
-- `"@RoleName"` (with optional `_if_*` suffix the simulator strips) resolves to
-  that role's address.
-- Pseudo-actions: `wait`, `simulate_price_drop` (calls `setPrice` on contracts
-  with that ABI from admin), `distribute_rewards` (calls `distribute()` from
-  admin with msg.value=amount_wei).
+For each role:
 
-Roles execute sequentially in spec order. Each role's full action list runs
-before the next role starts. Reverts are caught and logged but don't fail the
-scenario, which lets honest specs include speculative actions like
-`liquidate(@Borrower_if_underwater)`.
+1. **Single-action mutations**: drop / skip / self-target / insert each
+   honest action.
+2. **Compound depth-N (beam search)**: extend each top-K stem by every
+   possible action; score by primary-asset profit, or by total
+   |asset-delta| novelty if not yet profitable. Top-K kept per depth.
+3. **Coverage-guided pruning**: per-candidate executed-function set,
+   beam scoring boosted by novel-function-execution count vs honest.
+4. **Cross-contract synthesis**: `Token.fn` / `@@self` sentinels in
+   `callable_functions` let the mutator donate / transfer through any
+   deployed ERC20.
 
-### 3. Test (`tests/test_tier1_findings.py`)
+After every profitable deviation, a **classifier** labels it:
 
-Add a test that runs the campaign and asserts a matching finding exists:
+  - `TP_value_transfer` — another role's primary asset dropped vs honest
+  - `TP_protocol_drain` — main contract's primary asset dropped
+  - `STRATEGIC` — uses only own callables, no harm done elsewhere
+  - `OPT_OUT` — deviation is a strict subset of honest (no exploit)
 
-```python
-def test_yourcontract_finds_attack():
-    report = Campaign("specs/your_spec.yaml").run()
-    assert any(
-        _matches_expected(f, "RoleA", ["fn2"], 1 * 10**18)
-        for f in report.profitable_deviations()
-    )
-```
+Tests assert via `report.true_positives()` so OPT_OUT / STRATEGIC are
+tolerated as legitimate rational behavior, not flagged as bugs.
 
-## How it works
+## Adding a new protocol
 
-**Mutator** (`fuzzer/mutator/strategy_mutator.py`) deterministically enumerates
-candidate strategies for a role by applying four mutation kinds to the honest
-strategy:
+1. Solidity contract under `targets/.../YourContract.sol`. Include a
+   header naming the **incentive assumption** you suspect is unenforced.
+2. Spec under `specs/your_spec.yaml`.
+3. Test under `tests/test_*.py` asserting a finding pattern.
 
-1. **Self-targeting** — rewrite each existing `address` argument to the role's
-   own address.
-2. **Action skipping** — drop each individual honest action.
-3. **Action insertion** — for each function in `callable_functions`, insert it
-   at every position with default args (address args → self; numeric args
-   parameterized over a *value pool* drawn from numeric values across the
-   spec).
-4. **Numeric mutation** (off by default) — multiply existing numeric args by
-   {0.5, 0.9, 1.1, 1.5, 2.0}.
-
-**Simulator** (`fuzzer/core/simulator.py`) wraps an `anvil` subprocess. Per
-campaign: compile once via `forge build`, deploy once, fund roles via
-`anvil_setBalance`. Per scenario: `evm_snapshot` → execute roles in spec
-order → measure balance deltas → `evm_revert`. Reverts are tolerated.
-
-**Campaign** (`fuzzer/runner/campaign.py`) measures the honest baseline once,
-then for each role substitutes that role's strategy with each candidate and
-re-measures. A finding is recorded when `payoff(deviation) − payoff(honest) ≥
-ε` (default ε = 0.01 ETH, well above tx-gas noise).
+For mainnet attach (fork mode), point `contract_address` at the real
+deployment and set `fork.url` to your RPC env-var.
 
 ## Files
 
 ```
 fuzzer/
   core/
-    role.py         Role
-    strategy.py     Action, Strategy
-    utility.py      eth_balance_change
-    spec.py         YAML spec → typed objects
-    simulator.py    Anvil + web3 simulator
+    role.py             Role
+    strategy.py         Action, Strategy
+    utility.py          eth_balance_change
+    spec.py             YAML spec → typed objects
+    simulator.py        Anvil + web3 simulator (deploy & fork modes)
   mutator/
-    strategy_mutator.py
+    strategy_mutator.py 4 mutation kinds + compound_template
   runner/
-    campaign.py     Campaign.run()
+    campaign.py         Campaign.run() with beam search + budget
   reporter/
-    report.py       Finding, CampaignReport
-targets/tier1_trivial/
-  SimpleLending.sol     liquidate(self) bug
-  SimpleAuction.sol     seller-as-bidder + double payout bug
-  SimpleStaking.sol     self-delegation captures delegator pool
-specs/
-  simple_lending.yaml
-  simple_auction.yaml
-  simple_staking.yaml
+    report.py           Finding (classified), CampaignReport
+targets/
+  tier1_trivial/        SimpleLending / SimpleAuction / SimpleStaking
+  tier2_realistic/      ReferralVault / YieldFarm / RebatePool / SandwichPool
+  tier3_reproductions/  BeanstalkGov (governance-vote durability)
+  tier_a_canonical/     OZ-ERC4626 / Solmate-ERC4626 / SynthetixStakingRewards / SushiMasterChef
+  tier_b_canonical/     UniswapV2Pair / CompoundCErc20 / OZGovernor / LidoLite
+  tier_c_mainnet/       WETH9 / Curve3Pool / IERC4626 / Lido (ABI ports for fork attach)
+specs/                  matching .yaml per target
 tests/
-  test_tier1_findings.py
+  test_tier1_findings.py     incentive bugs in toy protocols
+  test_tier2_findings.py     incentive bugs in realistic mocks
+  test_tier3_findings.py     incentive bugs from real incidents
+  test_tier_a_canonical.py   FP-control on canonical safe versions
+  test_tier_b_canonical.py   FP-control on higher-stakes safe versions
+  test_tier_c_mainnet.py     FP-control on real mainnet, plus fork positive control
+scripts/
+  mainnet_sweep.py     multi-chain breadth sweep over 38+ addresses
+docs/
+  live-protocol-candidates.md  prioritized list of candidate test targets
 ```

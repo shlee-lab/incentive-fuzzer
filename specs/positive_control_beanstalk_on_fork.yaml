@@ -1,0 +1,67 @@
+contract: targets/tier3_reproductions/BeanstalkGov.sol
+contract_name: BeanstalkGov
+deploy_value_wei: 0
+deploy_args:
+  - "@@VOTE"
+  - "@@TRSY"
+
+# POSITIVE CONTROL for fork mode against an INCENTIVE-design bug.
+# Deploys our BeanstalkGov reproduction (no-snapshot governance — the
+# protocol's design ASSUMES voting weight is durable, but a rational
+# attacker who can transiently acquire majority drains the treasury)
+# atop a mainnet fork session. Validates that every fork-mode codepath
+# (env-var URL, fresh-address generation, anvil_impersonateAccount,
+# token-storage injection, depth-2 compound discovery) preserves the
+# fuzzer's ability to detect incentive-economic flaws.
+
+fork:
+  url: "${ALCHEMY_ETH_RPC}"
+
+tokens:
+  - name: VOTE
+    decimals: 18
+    initial_balances:
+      HonestStaker: 100_000_000_000_000_000_000
+      Attacker:    1_000_000_000_000_000_000_000
+  - name: TRSY
+    decimals: 18
+    initial_balances:
+      __admin__: 1_000_000_000_000_000_000_000
+
+setup_calls:
+  - { function: TRSY.transfer, args: { to: "@@self", amount: 1_000_000_000_000_000_000_000 } }
+
+roles:
+  - name: HonestStaker
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: VOTE
+    callable_functions: [deposit, withdraw]
+  - name: Attacker
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: TRSY
+    callable_functions: [deposit, proposeAndExecute, withdraw]
+
+honest_strategies:
+  HonestStaker:
+    actions: []
+  Attacker:
+    actions: []
+
+mutator_hints:
+  HonestStaker:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: false
+    try_numeric_mutation: false
+  Attacker:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: true
+    try_numeric_mutation: false
+    try_compound_pair_insertion: true
+
+expected_findings:
+  - role: Attacker
+    deviation_must_contain: [deposit, proposeAndExecute]
+    payoff_higher_than_honest: true
+    min_payoff_diff_wei: 100_000_000_000_000_000_000
