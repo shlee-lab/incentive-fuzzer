@@ -157,6 +157,22 @@ def auto_compound_templates(
                 {"fn": i, "phase": 0},
                 {"fn": o, "phase": PHASE_LAST},
             ])
+    # I. 5-step: inflow -> inflow -> manip -> outflow. Captures
+    # Cream-style donation attacks (deposit, depositCollateral, donate, borrow)
+    # where the attacker funnels assets in twice (asset then collateralize)
+    # before triggering the inflated valuation read.
+    for i1 in inflow:
+        for i2 in inflow:
+            if i1 == i2:
+                continue
+            for m in manips:
+                for o in outflow_effective:
+                    templates.append([
+                        {"fn": i1, "phase": 0},
+                        {"fn": i2, "phase": 1},
+                        {"fn": m,  "phase": 2},
+                        {"fn": o,  "phase": PHASE_LAST},
+                    ])
     # F. 4-step: inflow -> swap (pump) -> outflow (claim) -> swap (cash out).
     for i in inflow:
         for s1 in swaps:
@@ -170,6 +186,37 @@ def auto_compound_templates(
                         {"fn": o,  "phase": 2},
                         {"fn": s2, "phase": PHASE_LAST},
                     ])
+    # J. manip -> inflow -> outflow. Alpha-Homora-style where manip step
+    # (setLpValue / setOraclePrice) must precede the inflow so the borrow
+    # sees the inflated valuation.
+    for m in manips:
+        for i in inflow:
+            for o in outflow_effective:
+                templates.append([
+                    {"fn": m, "phase": 0},
+                    {"fn": i, "phase": 1},
+                    {"fn": o, "phase": PHASE_LAST},
+                ])
+    # K. action -> outflow_effective. Convex-bribe / Beanstalk-vote-style
+    # where attacker uses an action (vote / propose / commit) and value
+    # extraction is via subsequent outflow (claim / unvote).
+    for a in actions:
+        for o in outflow_effective:
+            templates.append([
+                {"fn": a, "phase": 0},
+                {"fn": o, "phase": PHASE_LAST},
+            ])
+    # L. action -> outflow -> outflow. Variant of K with chained outflows.
+    for a in actions:
+        for o1 in outflow_effective:
+            for o2 in outflow_effective:
+                if o1 == o2:
+                    continue
+                templates.append([
+                    {"fn": a,  "phase": 0},
+                    {"fn": o1, "phase": 1},
+                    {"fn": o2, "phase": PHASE_LAST},
+                ])
     # G. 4-step: inflow -> manip -> swap -> outflow.
     for i in inflow:
         for m in manips:
@@ -271,6 +318,19 @@ def _replace_address_args_with_self(
     return Action(function=action.function, args=new_args)
 
 
+# Pseudo-action arg variants. These functions are dispatched by the
+# simulator (not via ABI), so the auto-archetype generator has to
+# synthesize their args by name. Manually-curated set covering the
+# common "time advance" / "no-arg trigger" cases.
+PSEUDO_ACTION_VARIANTS: dict[str, list[dict]] = {
+    "wait":                [{}],
+    "advance_time":        [{"seconds": 3600}, {"seconds": 86400},
+                            {"seconds": 604800}, {"seconds": 2592000}],
+    "simulate_price_drop": [{"factor": 0.5}, {"factor": 0.7}, {"factor": 0.9}],
+    "distribute_rewards":  [{}],
+}
+
+
 def _build_default_args_variants(
     fn_name: str,
     role: Role,
@@ -279,12 +339,16 @@ def _build_default_args_variants(
     all_roles: list[Role] | None = None,
     token_abis: dict[str, list[dict]] | None = None,
 ) -> list[dict[str, Any]]:
+    # Pseudo-actions don't have ABI entries — emit hand-curated variants.
+    if fn_name in PSEUDO_ACTION_VARIANTS:
+        return [dict(v) for v in PSEUDO_ACTION_VARIANTS[fn_name]]
     fn = _find_fn_abi(abi, fn_name, token_abis)
     if fn is None:
         return []
     base: dict[str, Any] = {}
     numeric_keys: list[str] = []
     address_keys: list[str] = []
+    bool_keys: list[str] = []
     for inp in fn.get("inputs", []):
         if inp["type"] == "address":
             base[inp["name"]] = f"@{role.name}"
@@ -295,6 +359,7 @@ def _build_default_args_variants(
             numeric_keys.append(key)
         elif inp["type"] == "bool":
             base[inp["name"]] = False
+            bool_keys.append(inp["name"])
         elif inp["type"] == "bytes" or inp["type"].startswith("bytes"):
             base[inp["name"]] = ""
         else:
@@ -334,6 +399,12 @@ def _build_default_args_variants(
                 variant[nk] = v
             variants.append(variant)
             emitted += 1
+    # Boolean variants — try the flipped value for every bool arg.
+    if bool_keys:
+        for bk in bool_keys:
+            variant = dict(base)
+            variant[bk] = True
+            variants.append(variant)
     # Address variants: try each OTHER role and "@@self" (the main contract).
     if address_keys:
         targets: list[str] = []
