@@ -1,0 +1,57 @@
+contract: targets/tier_g_oneday/BananaGunSnipe.sol
+contract_name: BananaGunSnipe
+deploy_value_wei: 0
+deploy_args:
+  - "@@T"
+  - "@@Q"
+
+tokens:
+  - name: T
+    decimals: 18
+    initial_balances:
+      __admin__: 1_000_000_000_000_000_000_000_000     # 1M T seed
+  - name: Q
+    decimals: 18
+    initial_balances:
+      __admin__:    1_000_000_000_000_000_000_000      # 1k Q seed (tiny pool — fresh launch)
+      Sniper:    5_000_000_000_000_000_000_000        # 5k Q capital
+      LateBuyer: 5_000_000_000_000_000_000_000        # 5k Q capital
+
+setup_calls:
+  - { function: seed, args: { amtT: 1_000_000_000_000_000_000_000_000, amtQ: 1_000_000_000_000_000_000_000 } }
+
+roles:
+  - name: Sniper
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: T
+    default_phase: 0
+    callable_functions: [swapQforT, swapTforQ]
+    agent_type: best_response
+  - name: LateBuyer
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: T
+    default_phase: 1
+    callable_functions: [swapQforT]
+    agent_type: best_response
+
+honest_strategies:
+  Sniper:
+    actions: []
+  LateBuyer:
+    actions:
+      - { function: swapQforT, args: { amtIn: 5_000_000_000_000_000_000_000 }, phase: 1 }
+
+mutator_hints:
+  Sniper:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: true
+    try_numeric_mutation: false
+  LateBuyer:
+    try_self_targeting: false
+    try_skip_actions: false
+
+value_pool_extras:
+  - 5_000_000_000_000_000_000_000
+
+expected_findings: []

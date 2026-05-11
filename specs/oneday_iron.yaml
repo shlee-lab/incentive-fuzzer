@@ -1,0 +1,65 @@
+contract: targets/tier_g_oneday/IronFinanceRun.sol
+contract_name: IronFinanceRun
+deploy_value_wei: 0
+deploy_args:
+  - "@@IRON"
+  - "@@USDC"
+  - "@@TITAN"
+
+tokens:
+  - name: IRON
+    decimals: 18
+    initial_balances:
+      Alice: 50_000_000_000_000_000_000_000        # 50k IRON
+      Bob:   50_000_000_000_000_000_000_000        # 50k IRON
+  - name: USDC
+    decimals: 18
+    initial_balances:
+      __admin__: 2_000_000_000_000_000_000_000_000  # 2M USDC (1M for redeem reserve + 100k AMM seed + slack)
+  - name: TITAN
+    decimals: 18
+    initial_balances:
+      __admin__: 1_000_000_000_000_000_000_000_000  # 1M TITAN seed
+
+setup_calls:
+  - { function: USDC.transfer, args: { to: "@@self", amount: 1_000_000_000_000_000_000_000_000 } }
+  - { function: seedAMM, args: { amtT: 100_000_000_000_000_000_000_000, amtU: 100_000_000_000_000_000_000_000 } }
+  - { function: mintIRON, args: { to: "@Alice", amt: 50_000_000_000_000_000_000_000 } }
+  - { function: mintIRON, args: { to: "@Bob",   amt: 50_000_000_000_000_000_000_000 } }
+
+roles:
+  - name: Alice
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: USDC
+    default_phase: 0
+    callable_functions: [redeem]
+    agent_type: best_response
+  - name: Bob
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: USDC
+    default_phase: 1
+    callable_functions: [redeem]
+    agent_type: best_response
+
+honest_strategies:
+  Alice:
+    actions: []
+  Bob:
+    actions: []
+
+mutator_hints:
+  Alice:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: true
+    try_numeric_mutation: false
+  Bob:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: true
+    try_numeric_mutation: false
+
+value_pool_extras:
+  - 50_000_000_000_000_000_000_000
+
+expected_findings: []

@@ -1,0 +1,56 @@
+contract: targets/tier_g_oneday/MimMetapoolFlash.sol
+contract_name: MimMetapoolFlash
+deploy_value_wei: 0
+deploy_args:
+  - "@@MIM"
+  - "@@THREE"
+
+tokens:
+  - name: MIM
+    decimals: 18
+    initial_balances:
+      __admin__: 100_000_000_000_000_000_000_000
+      Attacker:  80_000_000_000_000_000_000_000   # 80k MIM pump capital
+  - name: THREE
+    decimals: 18
+    initial_balances:
+      __admin__: 100_000_000_000_000_000_000_000
+      Attacker:   1_000_000_000_000_000_000_000   # 1000 3CRV initial LP
+
+setup_calls:
+  - { function: seed, args: { amtM: 100_000_000_000_000_000_000_000, amt3: 100_000_000_000_000_000_000_000 } }
+
+roles:
+  - name: Attacker
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: THREE
+    callable_functions: [seed, swapMimFor3crv, swap3crvForMim, removeLiquidity]
+
+honest_strategies:
+  Attacker:
+    actions: []
+
+mutator_hints:
+  Attacker:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: false
+    try_numeric_mutation: false
+    try_compound_pair_insertion: false
+    max_candidates_per_role: 400
+    compound_template:
+      - fn: seed
+        phase: 0
+        values: [1_000_000_000_000_000_000_000]   # provide tiny LP first
+      - fn: swapMimFor3crv
+        phase: 1
+        values: [80_000_000_000_000_000_000_000]   # pump pool with 80k MIM
+      - fn: removeLiquidity
+        phase: 2
+        values: [500_000_000_000_000_000_000, 1_000_000_000_000_000_000_000]   # burn LP
+
+expected_findings:
+  - role: Attacker
+    deviation_must_contain: [seed, swapMimFor3crv, removeLiquidity]
+    payoff_higher_than_honest: true
+    min_payoff_diff_wei: 100_000_000_000_000_000_000   # +100 3CRV
