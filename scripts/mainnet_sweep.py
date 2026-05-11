@@ -137,20 +137,32 @@ TARGETS = [
     # ERC4626 vaults
     ("erc4626", "ETH:wstETH",  "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0", "ETH"),
     ("erc4626", "ETH:sfrxETH", "0xac3E018457B222d93114458476f3E3416Abbe38F", "ETH"),
+    # Newer / smaller TVL ERC4626 vaults
+    ("erc4626", "ETH:sUSDe_Ethena", "0x9D39A5DE30e57443BfF2A8307A4256c8797A3497", "ETH"),
+    ("erc4626", "ETH:sFRAX",        "0xA663B02CF0a4b149d2aD41910CB81e23e1c41c32", "ETH"),
+    ("erc4626", "ETH:woETH_Origin", "0xDcEe70654261AF21C44c093C300eD3Bb97b78192", "ETH"),
+    # Curve V2 cryptopool (different invariant from stable metapools)
+    ("curve", "ETH:Curve_tricrypto2", "0xD51a44d3FaE010294C616388b506AcdA1bfAAE46", "ETH"),
+    ("curve", "ETH:Curve_steth-eth", "0xDC24316b9AE028F1497c275EB9192a3Ea0f67022", "ETH"),
+    # Smaller / older Curve metapools
+    ("curve", "ETH:Curve_GUSD-3CRV", "0x4f062658EaAF2C1ccf8C8e36D6824CDf41167956", "ETH"),
+    ("curve", "ETH:Curve_USDD-3CRV", "0xe6b5CC1B4b47305c58392CE3D359B10282FC36Ea", "ETH"),
+    ("curve", "ETH:Curve_HUSD-3CRV", "0x3eF6A01A0f81D6046290f3e2A8c5b843e738E604", "ETH"),
+    ("curve", "ETH:Curve_BUSDv2",    "0x4807862AA8b2bF68830e4C8dc86D0e9A998e085a", "ETH"),
 
     # ============== Arbitrum ==============
-    # Sushiswap V2 pairs on Arbitrum
     ("v2", "ARB:Sushi_WETH_USDC",  "0x905dfCD5649217c42684f23958568e533C711Aa3", "ARB"),
     ("v2", "ARB:Sushi_WETH_USDT",  "0xCB0E5bFa72bBb4d16AB5aA0c60601c438F04b4ad", "ARB"),
-    # Camelot V2 (UniV2 fork on Arbitrum)
     ("v2", "ARB:Camelot_USDC_WETH","0x84652bb2539513BAf36e225c930Fdd8eaa63CE27", "ARB"),
+    ("v2", "ARB:Sushi_WBTC_WETH",  "0x515e252b2b5c22b4b2b6Df66c2eBeeA871AA4d69", "ARB"),
+    ("v2", "ARB:Sushi_LINK_WETH",  "0x9D90eDB1Ab44D77881571f48937B1B7B6C8c5e2A", "ARB"),
 
     # ============== Base ==============
-    # Aerodrome / Uniswap V2 on Base (some are V2-style)
     ("v2", "BASE:UniV2_WETH_USDC", "0x88A43bbDF9D098eEC7bCEda4e2494615dfD9bB9C", "BASE"),
 
     # ============== Optimism ==============
     ("v2", "OP:Velo_WETH_USDC",    "0x79c912FEF520be002c2B6e57EC4324e260f38E50", "OP"),
+    ("v2", "OP:Velo_OP_WETH",      "0x0493Bf8b6DBB159Ce2Db2E0E8403E753Abd1235b", "OP"),
 ]
 
 

@@ -139,6 +139,24 @@ def test_mainnet_weth9_reentrancy_blocked():
 
 
 @pytest.mark.timeout(60)
+def test_positive_control_read_only_reentrancy():
+    """POSITIVE CONTROL #5: read-only reentrancy. RORVault has a CEI
+    violation in withdraw — totalShares decremented before transfer,
+    totalAssets after. The pricePerShare view is briefly inflated during
+    the transfer callback; a consumer paying based on that view (here
+    folded into the same contract as claimBonus) overpays. RORAttacker
+    callback queries claimBonus during withdraw and drains the bonus
+    reserve.
+    """
+    report = _run_or_skip("specs/positive_control_ror.yaml")
+    tps = report.true_positives()
+    assert tps, "Read-only reentrancy not detected."
+    assert max(f.payoff_diff_wei for f in tps) > 500_000_000_000_000_000, (
+        "RoR drain below 0.5 ETH — stale view may not be triggering."
+    )
+
+
+@pytest.mark.timeout(60)
 def test_positive_control_reentrancy():
     """POSITIVE CONTROL #4: textbook reentrancy bug on VulnVault. Proves
     the new attack class (contract-deployed roles + callback-driven
