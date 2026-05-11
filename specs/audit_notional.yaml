@@ -1,0 +1,50 @@
+contract: targets/tier_h_audit/NotionalFCashArb.sol
+contract_name: NotionalFCashArb
+deploy_value_wei: 0
+deploy_args:
+  - "@@CASH"
+
+tokens:
+  - name: CASH
+    decimals: 18
+    initial_balances:
+      __admin__: 1_000_000_000_000_000_000_000_000     # 1M CASH seed
+      Attacker:   100_000_000_000_000_000_000_000      # 100k CASH capital
+
+setup_calls:
+  - { function: seed, args: { amtCash: 100_000_000_000_000_000_000_000, amtFCash: 100_000_000_000_000_000_000_000 } }
+
+roles:
+  - name: Attacker
+    initial_eth_wei: 1_000_000_000_000_000_000_000
+    primary_asset: CASH
+    callable_functions: [mintFCash, redeemFCash]
+
+honest_strategies:
+  Attacker:
+    actions: []
+
+mutator_hints:
+  Attacker:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: false
+    try_numeric_mutation: false
+    try_compound_pair_insertion: false
+    max_candidates_per_role: 400
+    compound_template:
+      - fn: mintFCash
+        phase: 0
+        values: [1_000_000_000_000_000_000_000, 10_000_000_000_000_000_000_000]
+      - fn: mintFCash
+        phase: 1
+        values: [80_000_000_000_000_000_000_000, 90_000_000_000_000_000_000_000]
+      - fn: redeemFCash
+        phase: 2
+        values: [1_000_000_000_000_000_000_000_000, 10_000_000_000_000_000_000_000_000]
+
+expected_findings:
+  - role: Attacker
+    deviation_must_contain: [mintFCash, mintFCash, redeemFCash]
+    payoff_higher_than_honest: true
+    min_payoff_diff_wei: 1_000_000_000_000_000_000_000
