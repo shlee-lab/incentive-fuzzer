@@ -73,6 +73,44 @@ that already encode the attack shape, or protocol-specific payload
 encoders. We position this tool as a **design-time guardrail for new
 protocols**, not a mainnet zero-day finder.
 
+### Autonomous discovery benchmark (N=33 reductions)
+
+Beyond the hand-tuned specs above, we converted every reduction to
+`auto_compound_templates: true` (manual `compound_template` stripped)
+and measured how often the fuzzer rediscovers the attack from
+`callable_functions` + archetype enumeration alone.
+
+| Generation | Improvement | Detection on N=33 |
+|---|---|---|
+| Initial (verifier) | manual hint required | 0% |
+| + multi-arg variants + per-slot values | Warp LP, mintLP(a,b) reachable | 12% |
+| + utility-gradient beam scoring | direction-aware stem ranking | 50% |
+| + 12 archetype catalog (A–L) + multi-category classify | inflow/swap/manip/outflow/action; outflow fallback to swap/action | 79% |
+| + pseudo-action variants + 4-step + bool args + symbolic args | `advance_time`, `setExpiry(true)`, `require(X op CONST)` boundaries | 85% |
+| + flash loan modeling (`flash_loan: true`) | 1e30 wei capital injection per role | 88% (Pendle YT/PT added) |
+
+Remaining 4 miss (Cream donation, Alpha Homora fake-LP, Aave eMode
+boundary, Indexed rebalance) require multi-contract payload synthesis
+that single-contract archetype enumeration cannot express.
+
+### Real-world re-attempt with all improvements
+
+After the four fuzzer extensions above, we re-ran on:
+
+| Target | Result |
+|---|---|
+| Monetrix sUSDM (Code4rena 2026-04, single-file standalone) | **0 / 3018 candidates** — `_decimalsOffset=6`, `onlyVault` injectYield, 7-day cooldown, `totalSupply > 0` check all block known archetypes |
+| sUSDe (Ethena) fork attach + flash loan | **0 / 1500 candidates** in 432s — production guards + ABI scope close every path |
+| 9 mainnet contracts with `flash_loan: true` flag | partial — anvil fork + Alchemy RPC dominates, no new findings |
+
+**Mainnet zero-day count to date: 0.** The reduction-vs-mainnet gap is
+not bridged by flash loan + symbolic args + 12 archetypes alone. The
+gap is dominated by what generic mutators cannot synthesize:
+multi-contract attacker code deploy (fake LP / oracle wrapper),
+specialized payload bytes (`diamondCut`, malicious BIP), and
+cross-protocol orchestration (Mango: Mango + Serum + USDC vault
+in one tx).
+
 ### Echidna baseline comparison
 
 On the same `BeanstalkGov` reduction:
@@ -90,6 +128,135 @@ matches; treasury balance is ≤ initial. Echidna cannot express
 "attacker's utility delta vs the honest strategy" as a pure-state
 predicate. See `comparison/echidna/RESULTS.md` for details and
 reproduction.
+
+## Handoff for the next agent
+
+State at session close: **strong reduction-level capability (85–88%
+autonomous detection on N=33), zero mainnet zero-days, every blocker
+to the gap is now characterized.** The agent picking this up should
+not need to re-derive anything.
+
+### What's in the tree
+
+- `fuzzer/core/` — Spec, Simulator (anvil + web3), Strategy/Action
+- `fuzzer/mutator/strategy_mutator.py` — archetypes A–L, multi-category
+  classifier, pseudo-action variants, bool variants, symbolic constant
+  scanner, value-pool builder
+- `fuzzer/runner/campaign.py` — Campaign + beam search with utility-
+  gradient scoring
+- `fuzzer/reporter/report.py` — Finding classifier (`TP_value_transfer`,
+  `TP_protocol_drain`, `STRATEGIC`, `OPT_OUT`)
+- `targets/` — eight tiers
+  - `tier1_trivial/` / `tier2_realistic/` / `tier3_reproductions/`
+  - `tier_a_canonical/` / `tier_b_canonical/` / `tier_c_mainnet/` — FP controls
+  - `tier_e_multiagent/` — `SharedTreasury.sol` (iterated best response)
+  - `tier_f_oracle/` — `OracleLending.sol` (Mango/Cream class)
+  - `tier_g_oneday/` — 21 reductions of named 1-day attacks (Beanstalk,
+    PancakeBunny, Harvest, Iron, MIM, GMX, Olympus, bZx, Eminence, ...)
+  - `tier_h_audit/` — 10 reductions of audit-disclosed findings
+    (Pendle, Yearn V3 strategist, Aave eMode, Beefy inflation, ...)
+  - `tier_i_newprotocol/` — `MonetrixSUSDM.sol` (audit-grade reference)
+- `specs/` — every reduction has 1+ spec; `auto_*.yaml` = same protocol
+  with manual hint stripped; `flash_*.yaml` = flash-loan enabled variant
+- `scripts/benchmark.py` — full per-spec subprocess benchmark + CSV
+- `scripts/convert_to_automode.py`, `scripts/enable_flash_loan.py` —
+  bulk-rewrite helpers
+- `comparison/echidna/` — side-by-side baseline (4 TPs vs 0)
+
+### Key spec hints (already implemented)
+
+```yaml
+mutator_hints:
+  Attacker:
+    auto_compound_templates: true     # let fuzzer enumerate 12 archetypes
+    compound_template:                # OR pin a specific shape
+      - { fn: deposit, phase: 0, values: [1e21, 1e22] }
+      - { fn: report,  phase: 1, args: { profit: 1e24 } }
+      - { fn: withdraw, phase: 2 }
+    max_candidates_per_role: 3000
+flash_loan: true                       # spec-level — inject 1e30 wei per token per role
+```
+
+### The 4 archetype-irreducible cases
+
+Still missing after every current improvement. These are the right
+test cases for the next round of fuzzer work:
+
+1. **Cream yUSDVault (`auto_oneday_cream_yvault.yaml`)** —
+   `deposit → depositCollateral → DAI.transfer → borrow` 4-step where
+   the manip step is a TOKEN's `transfer`, not the main contract's
+   method. Archetype I (inflow→inflow→manip→outflow) covers shape but
+   the arg-pool's address slots don't find the right (`@@self`, huge)
+   combination within budget.
+2. **Alpha Homora `auto_oneday_alphahomora.yaml`** — needs
+   `setLpValue(@Attacker, huge_value)`. Address-arg sentinel and
+   value combination both required; cartesian variants too sparse.
+3. **Aave V3 eMode `auto_audit_aave_emode.yaml`** — needs
+   `setPrices(cP=1e18, dP=1.01e18)` paired-numeric boundary just
+   above the LTV threshold. Symbolic-constant scanner finds 9700/10000
+   BPS but not the cP/dP pair.
+4. **Indexed Finance `auto_oneday_indexed.yaml`** — needs a rebalance
+   trigger between the swap and the exit; archetype catalog has
+   `swap → outflow` and `swap → swap → outflow` but not the precise
+   ordering Indexed requires.
+
+### Highest-leverage next steps
+
+In rough priority order, none of which a single contract's ABI alone
+can express:
+
+1. **Multi-contract attacker code deploy.** Let spec declare
+   `attacker_contracts: [path]` and let the mutator route calls
+   through that attacker contract's methods. Unlocks Alpha Homora
+   (fake LP), Eminence (multi-curve), Pickle (malicious jar address),
+   and most flash-loan-style real exploits where the attacker's
+   logic lives in a deployed receiver.
+2. **Multi-step "ghost args" inference.** Read previous-step return
+   values into next-step args. Cream's 4-step needs the
+   shares-received from `deposit` flowed into `depositCollateral`.
+3. **Specialized payload encoders.** Plug-in registry per attack
+   class: `diamondCut(bytes)` for Diamond governance,
+   `BIP_encoder` for Beanstalk, `swap_route_encoder` for multi-pool
+   AMM paths.
+4. **TWAP / oracle-staleness modeling.** `evm_increaseTime` already
+   works for the time axis; needs a way to assert "oracle X is N
+   blocks stale" and let the fuzzer try update-vs-no-update branches.
+5. **Spec auto-gen from ABI.** Parse a Solidity file → suggested
+   `callable_functions`, `primary_asset` from transfer flow, baseline
+   `honest_strategies: []`. Reduces spec-writing cost from hours to
+   seconds for new protocols.
+
+### Running
+
+```bash
+# Setup
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+forge build
+source .env.local                  # ALCHEMY_ETH_RPC=...
+
+# Single spec
+python -m fuzzer.runner.campaign specs/beanstalk_gov.yaml
+
+# Auto-mode benchmark (N=33)
+python scripts/benchmark.py --filter auto_ --timeout 90
+
+# Reproduce mainnet zero-day attempt
+python scripts/benchmark.py --filter flash_ --timeout 300
+
+# Echidna baseline comparison
+cd comparison/echidna && bash run_echidna.sh
+```
+
+### Final numbers at handoff
+
+| | Result |
+|---|---|
+| Reduction-level (manual hint) | 85–95% across tiers 1–3, G, H |
+| Reduction-level (auto-mode N=33) | 28/33 = 85% — Pendle joined via flash loan = 29/33 = 88% |
+| Newer-protocol (Monetrix audit-grade) | 0 / 3018 |
+| Mainnet production (57 contracts, 1400+ cand) | **0 zero-days** |
+| Fuzzer commits in tree | 16 (each with reproducible spec/test) |
 
 ## Setup
 
