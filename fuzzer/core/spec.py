@@ -74,6 +74,12 @@ class Spec:
     setup_calls: list["Action"] = field(default_factory=list)
     expected_findings: list[ExpectedFinding] = field(default_factory=list)
     value_pool_extras: list[int] = field(default_factory=list)
+    # Flash-loan modeling. When true, the simulator injects 1e30 wei of
+    # every spec-declared token AND 1e24 wei of ETH into every role
+    # marked `flash_loan_enabled: true` before each scenario. Models
+    # the infinite-capital assumption underlying virtually every
+    # mainnet incentive exploit.
+    flash_loan: bool = False
 
     def role_by_name(self, name: str) -> Role:
         for r in self.roles:
@@ -218,4 +224,5 @@ def load_spec(path: str | Path, role_addresses: dict[str, str]) -> Spec:
         setup_calls=setup_calls,
         expected_findings=expected,
         value_pool_extras=value_pool_extras,
+        flash_loan=bool(raw.get("flash_loan", False)),
     )

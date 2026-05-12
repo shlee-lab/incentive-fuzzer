@@ -1,0 +1,27 @@
+contract: targets/tier_c_mainnet/IERC4626.sol
+contract_name: IERC4626
+contract_address: '0x028eC7330ff87667b6dfb0D94b954c820195336c'
+fork:
+  url: ${ALCHEMY_ETH_RPC}
+roles:
+- name: Attacker
+  initial_eth_wei: 10000000000000000000000
+  primary_asset: ETH
+  callable_functions:
+  - deposit
+  - redeem
+  - withdraw
+  - mint
+honest_strategies:
+  Attacker:
+    actions: []
+mutator_hints:
+  Attacker:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: true
+    try_numeric_mutation: false
+    max_candidates_per_role: 1500
+    auto_compound_templates: true
+expected_findings: []
+flash_loan: true

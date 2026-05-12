@@ -46,3 +46,4 @@ expected_findings:
 - role: Attacker
   payoff_higher_than_honest: true
   min_payoff_diff_wei: 10000000000000000000000
+flash_loan: true

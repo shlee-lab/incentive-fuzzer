@@ -1,0 +1,31 @@
+contract: targets/tier_c_mainnet/BeanstalkDiamond.sol
+contract_name: BeanstalkDiamond
+contract_address: '0xC1E088fC1323b20BCBee9bd1B9fC9546db5624C5'
+fork:
+  url: ${ALCHEMY_ETH_RPC}
+  block: 14602789
+roles:
+- name: Attacker
+  initial_eth_wei: 100000000000000000000
+  primary_asset: ETH
+  callable_functions:
+  - deposit
+  - withdraw
+  - propose
+  - vote
+  - emergencyCommit
+  - commit
+honest_strategies:
+  Attacker:
+    actions: []
+mutator_hints:
+  Attacker:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: true
+    try_numeric_mutation: false
+    try_compound_pair_insertion: true
+    max_candidates_per_role: 1500
+    auto_compound_templates: true
+expected_findings: []
+flash_loan: true

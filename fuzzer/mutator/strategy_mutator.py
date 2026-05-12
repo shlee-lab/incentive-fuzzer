@@ -262,6 +262,57 @@ def _has_address_arg(
     return any(inp["type"] == "address" for inp in fn.get("inputs", []))
 
 
+def _extract_constants_from_source(contract_path) -> list[int]:
+    """Scan a contract source for numeric constants that appear in
+    `require(... op CONST)` or as named-constant declarations.
+
+    Captures attack-relevant boundary values like the 15000-BPS CR cap,
+    the 11000-BPS liquidation bonus, the 1e18 reference price, etc.
+    Returns empty list if the file is unreadable (fork-attach specs that
+    don't have a local source).
+    """
+    import re
+    from pathlib import Path
+    out: set[int] = set()
+    try:
+        text = Path(contract_path).read_text()
+    except Exception:
+        return []
+    # uint256 constant NAME = 12345; or uint256 public constant NAME = 12345e18;
+    for m in re.finditer(r"constant\s+\w+\s*=\s*([0-9_]+(?:e[0-9]+)?)\s*;", text):
+        try:
+            tok = m.group(1).replace("_", "")
+            if "e" in tok:
+                base, exp = tok.split("e")
+                out.add(int(base) * (10 ** int(exp)))
+            else:
+                out.add(int(tok))
+        except Exception:
+            pass
+    # require(<lhs> <op> <number>) or require(<lhs> <op> <number>e18 ...)
+    for m in re.finditer(
+        r"require\s*\([^,)]+(?:<=?|>=?|==|!=)\s*([0-9_]+(?:e[0-9]+)?)", text
+    ):
+        try:
+            tok = m.group(1).replace("_", "")
+            if "e" in tok:
+                base, exp = tok.split("e")
+                out.add(int(base) * (10 ** int(exp)))
+            else:
+                out.add(int(tok))
+        except Exception:
+            pass
+    # Also catch the common boundary values plus/minus 1 — many threshold
+    # attacks need precisely (threshold + 1).
+    extras: set[int] = set()
+    for v in list(out):
+        extras.add(v + 1)
+        if v > 0:
+            extras.add(v - 1)
+    out.update(extras)
+    return sorted(out)
+
+
 def _collect_value_pool(spec: Spec, role: Role) -> list[int]:
     """Collect interesting integer values from across the spec."""
     pool: set[int] = {0, 10**18}
@@ -297,6 +348,11 @@ def _collect_value_pool(spec: Spec, role: Role) -> list[int]:
         pool.add(int(v))
     pool.add(role.initial_eth)
     pool.add(1)  # always include 1 wei (donation-attack staple)
+    # Symbolic constants from the contract source (require thresholds,
+    # constant decls, ±1 boundary values). Helps the fuzzer hit exact
+    # `require(x op CONST)` boundaries that pure value-pool sampling misses.
+    for v in _extract_constants_from_source(spec.contract_path):
+        pool.add(int(v))
     return sorted(pool)
 
 

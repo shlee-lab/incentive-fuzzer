@@ -548,10 +548,34 @@ class Simulator:
             reverts.append(f"{role.name}.{action.function}: {e}")
             log.append(f"[{role.name}] ERROR {action.function} ({e})")
 
+    def _inject_token_balance(self, token_name: str, owner: str, amount: int) -> None:
+        """Flash-loan-style balance injection — works in both deploy and fork mode."""
+        token = self._token_contracts[token_name]
+        tdef = next((t for t in self.spec.tokens if t.name == token_name), None)
+        if tdef is not None and tdef.storage_balance_slot is not None:
+            self._set_erc20_balance(token.address, owner, amount, tdef.storage_balance_slot)
+        else:
+            tx = token.functions.mint(owner, amount).transact({"from": self.admin_address})
+            self.w3.eth.wait_for_transaction_receipt(tx)
+
     def execute_scenario(self, strategies: dict[str, Strategy]) -> ExecutionResult:
         snap = self._snapshot()
         log: list[str] = []
         reverts: list[str] = []
+        # Flash loan: inject huge ETH + token balance into every role BEFORE
+        # taking the initial-balance snapshot. Models the infinite-capital
+        # assumption that underlies essentially every mainnet exploit. We
+        # snapshot AFTER injection so the asset deltas don't show the flash
+        # balance as a phantom +1e30 gain — only the attacker's actual
+        # profit (final - post-injection-initial) is measured.
+        if self.spec.flash_loan:
+            for r in self.spec.roles:
+                try:
+                    self._set_balance(r.address, 10**24)
+                    for tname in self._token_contracts:
+                        self._inject_token_balance(tname, r.address, 10**30)
+                except Exception:
+                    pass
         initial = self._snapshot_balances()
         try:
             # Gather all (role, action) pairs and sort by (effective_phase, role_index, action_index).

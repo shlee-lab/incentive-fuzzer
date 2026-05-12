@@ -1,0 +1,64 @@
+contract: targets/tier_c_mainnet/IERC4626.sol
+contract_name: IERC4626
+contract_address: '0x83F20F44975D03b1b09e64809B757c47f942BEeA'
+fork:
+  url: ${ALCHEMY_ETH_RPC}
+tokens:
+- name: DAI
+  decimals: 18
+  address: '0x6B175474E89094C44Da98b954EedeAC495271d0F'
+  storage_balance_slot: 2
+  initial_balances:
+    Victim: 100000000000000000000
+    Attacker: 1000000000000000000000
+roles:
+- name: Victim
+  initial_eth_wei: 1000000000000000000000
+  primary_asset: DAI
+  default_phase: 2
+  callable_functions:
+  - deposit
+  - redeem
+  - withdraw
+  - mint
+- name: Attacker
+  initial_eth_wei: 1000000000000000000000
+  primary_asset: DAI
+  default_phase: 0
+  callable_functions:
+  - deposit
+  - redeem
+  - withdraw
+  - mint
+  - DAI.transfer
+honest_strategies:
+  Victim:
+    actions:
+    - function: deposit
+      args:
+        assets: 100000000000000000000
+        receiver: '@Victim'
+  Attacker:
+    actions: []
+mutator_hints:
+  Victim:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: false
+    try_numeric_mutation: false
+    auto_compound_templates: true
+    max_candidates_per_role: 1500
+  Attacker:
+    try_self_targeting: false
+    try_skip_actions: false
+    try_action_insertion: true
+    try_numeric_mutation: false
+    try_compound_pair_insertion: true
+    compound_beam_max_depth: 3
+    compound_beam_width: 15
+    max_candidates_per_role: 1500
+    auto_compound_templates: true
+value_pool_extras:
+- 1
+expected_findings: []
+flash_loan: true

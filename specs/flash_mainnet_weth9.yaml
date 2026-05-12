@@ -1,0 +1,34 @@
+contract: targets/tier_c_mainnet/WETH9.sol
+contract_name: WETH9
+contract_address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
+fork:
+  url: ${ALCHEMY_ETH_RPC}
+roles:
+- name: User
+  initial_eth_wei: 100000000000000000000
+  primary_asset: ETH
+  callable_functions:
+  - deposit
+  - withdraw
+  - transfer
+  - transferFrom
+  - approve
+honest_strategies:
+  User:
+    actions:
+    - function: deposit
+      args:
+        value_wei: 1000000000000000000
+    - function: withdraw
+      args:
+        wad: 1000000000000000000
+mutator_hints:
+  User:
+    try_self_targeting: true
+    try_skip_actions: true
+    try_action_insertion: true
+    try_numeric_mutation: false
+    max_candidates_per_role: 1500
+    auto_compound_templates: true
+expected_findings: []
+flash_loan: true
